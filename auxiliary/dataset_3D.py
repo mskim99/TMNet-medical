@@ -131,7 +131,7 @@ class ShapeNet(data.Dataset):
                 vol_data[v_idx] = stack_data[m_idx]
         else:
             vol_data = 0
-        return vol_data, points_sampled, normals_sampled, faces_sampled, name, cat
+        return vol_data, points_sampled, normals_sampled, faces_sampled, points_origin, name, cat
 
     def __len__(self):
         return len(self.datapath)

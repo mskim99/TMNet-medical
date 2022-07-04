@@ -24,7 +24,7 @@ parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to
 parser.add_argument('--epoch_decay', type=int, default=300, help='epoch to decay lr')
 parser.add_argument('--epoch_decay2', type=int, default=400, help='epoch to decay lr for the second time')
 parser.add_argument('--model', type=str, default='', help='model path from the pretrained model')
-parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud')
+parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud') # 10000
 parser.add_argument('--num_vertices', type=int, default=2562, help='number of vertices of the initial sphere')
 parser.add_argument('--num_samples',type=int,default=2500, help='number of samples for error estimation')
 parser.add_argument('--env', type=str, default="SVR_subnet1_3", help='visdom env')
@@ -55,6 +55,7 @@ print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
@@ -142,23 +143,16 @@ for epoch in range(opt.nepoch):
 
     for i, data in enumerate(dataloader, 0):
         optimizer.zero_grad()
-        img, points, normals, faces_gt, name, cat = data
+        img, points, normals, faces_gt, points_orig, name, cat = data
         img = img.cuda()
         img = img.unsqueeze(dim=0)
         img = img.float()
 
-        '''
-        vol_noize = torch.randn([1, 256, 256, 256])
-        vol_noize = vol_noize.cuda()
-        vol_noize = vol_noize.float()
-        img = 0.925 * img + 0.075 * vol_noize
-        '''
-
         points = points.cuda()
         normals = normals.cuda()
+        faces_gt = torch.squeeze(faces_gt)
         faces_gt_cuda = faces_gt.cuda()
-        faces_gt_np = np.array(faces_gt)
-        edge_cuda_gt = get_edges(faces_gt_np)
+        edge_cuda_gt = get_edges(faces_gt.numpy())
         points = points.float()
         choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
         points_choice = points[:, choice, :].contiguous()
@@ -184,7 +178,7 @@ for epoch in range(opt.nepoch):
         CDs_loss = torch.mean(dist1_samples) + torch.mean(dist2_samples)
         l2_loss = calculate_l2_loss(error, error_GT.detach())
         # edge_loss = get_edge_loss_stage1(pointsRec, edge_cuda.detach())
-        edge_loss = get_edge_loss_stage1_whmr(pointsRec, points, edge_cuda.detach(), edge_cuda_gt.detach())
+        edge_loss = get_edge_loss_stage1_whmr(pointsRec, points_orig, edge_cuda, edge_cuda_gt)
         smoothness_loss = get_smoothness_loss_stage1(pointsRec, parameters)
         faces_cuda_bn = faces_cuda.unsqueeze(0).expand(pointsRec.size(0), faces_cuda.size(0),faces_cuda.size(1))
         normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
@@ -231,7 +225,7 @@ for epoch in range(opt.nepoch):
 
         network.eval()
         for i, data in enumerate(dataloader_test, 0):
-            img, points, normals, faces_gt, name, cat = data
+            img, points, normals, faces_gt, points_orig, name, cat = data
             img = img.cuda()
             img = img.unsqueeze(dim=0)
             img = img.float()
@@ -240,7 +234,7 @@ for epoch in range(opt.nepoch):
             normals = normals.cuda()
             faces_gt = torch.squeeze(faces_gt)
             faces_gt_cuda = faces_gt.cuda()
-            edge_cuda_gt = get_edges(faces_gt.detach())
+            edge_cuda_gt = get_edges(faces_gt.numpy())
             points = points.float()
             choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
             points_choice = points[:, choice, :].contiguous()
@@ -262,7 +256,7 @@ for epoch in range(opt.nepoch):
 
             CD_loss = torch.mean(dist1) + torch.mean(dist2)
             # edge_loss = get_edge_loss_stage1(pointsRec, edge_cuda.detach())
-            edge_loss = get_edge_loss_stage1_whmr(pointsRec, points, edge_cuda.detach(), edge_cuda_gt.detach())
+            edge_loss = get_edge_loss_stage1_whmr(pointsRec, points_orig, edge_cuda, edge_cuda_gt)
             smoothness_loss = get_smoothness_loss_stage1(pointsRec, parameters)
             l2_loss = calculate_l2_loss(error, error_GT.detach())
             CDs_loss = (torch.mean(dist1_samples)) + (torch.mean(dist2_samples))
