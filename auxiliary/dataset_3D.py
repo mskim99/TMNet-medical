@@ -4,7 +4,8 @@ import os.path
 import torchvision.transforms as transforms
 from PIL import Image
 from utils import *
-import meshio
+# import meshio
+import meshio_custom
 import time
 import glob
 import math
@@ -72,7 +73,7 @@ class ShapeNet(data.Dataset):
                 self.datapath.append(fn)
 
         self.transforms = transforms.Compose([
-                             transforms.Resize(size =  224, interpolation = 2),
+                             transforms.Resize(size =  256, interpolation = 2),
                              transforms.ToTensor(),
                         ])
 
@@ -84,17 +85,30 @@ class ShapeNet(data.Dataset):
         fn = self.datapath[index]
 
         # Obj format
-        mesh = meshio.read(fn[1])
-        points = mesh.points
-        points_max = np.max(points)
-        points = points / points_max
-        indices = np.random.randint(points.shape[0], size=self.npoints)
-        points = points[indices,:]
+        # mesh = meshio.read(fn[1])
+        # points = mesh.points
+
+        mesh = meshio_custom.read_obj(fn[1])
+        points_origin = mesh['vertices']
+        faces_origin = mesh['faces']
+
+        points_max = np.max(points_origin, axis=0)
+        points_min = np.min(points_origin, axis=0)
+        points_origin = (points_origin - points_min) / (points_max - points_min)
+
+        indices = np.random.randint(points_origin.shape[0], size=self.npoints)
+        points_sampled = points_origin[indices,:]
+        faces_sampled = faces_origin[indices,:]
         if self.normal:
-            normals = mesh.get_cells_type("triangle")
-            normals = normals[indices,:]
+            # normals = mesh.get_cells_type("triangle")
+            normals_sampled = np.zeros([self.npoints, 3])
+            for i in range(0, self.npoints):
+                v10 = points_origin[faces_sampled[i, 1]] - points_origin[faces_sampled[i, 0]]
+                v20 = points_origin[faces_sampled[i, 2]] - points_origin[faces_sampled[i, 0]]
+                normals_sampled[i, :] = np.cross(v10, v20)
+                # normals = normals[indices,:]
         else:
-            normals = 0
+            normals_sampled = 0
 
         cat = fn[2]
         name = fn[3]
@@ -102,23 +116,22 @@ class ShapeNet(data.Dataset):
             files = glob.glob(os.path.join(fn[0], '*.%s' % self.extension))
             files = sorted(files)
             num_files = len(files)
-            stack_data = np.zeros([num_files, 224, 224])
+            stack_data = np.zeros([num_files, 256, 256])
             for idx in range(0, num_files):
                 filename = files[idx]
                 image = Image.open(filename)
-                image = image.resize([137, 137])
+                image = image.resize([256, 256])
                 data = self.transforms(image)
                 data = data[0, :, :]
                 stack_data[idx] = data
 
-            vol_data = np.zeros([224, 224, 224])
-            for v_idx in range(0, 224):
-                m_idx = max(0, math.ceil(float(v_idx) * float(num_files) / 224.) - 1)
-                print(str(v_idx) + ' ' + str(m_idx))
+            vol_data = np.zeros([256, 256, 256])
+            for v_idx in range(0, 256):
+                m_idx = max(0, math.ceil(float(v_idx) * float(num_files) / 256.) - 1)
                 vol_data[v_idx] = stack_data[m_idx]
         else:
-            data = 0
-        return data, points, normals, name, cat
+            vol_data = 0
+        return vol_data, points_sampled, normals_sampled, faces_sampled, name, cat
 
     def __len__(self):
         return len(self.datapath)

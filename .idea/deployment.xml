@@ -2,13 +2,6 @@
 <project version="4">
   <component name="PublishConfigData" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
-      <paths name="jionkim@165.246.42.44:22 SMR">
-        <serverdata>
-          <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
       <paths name="jionkim@165.246.42.44:22 TMNet">
         <serverdata>
           <mappings>
@@ -23,7 +16,14 @@
           </mappings>
         </serverdata>
       </paths>
-      <paths name="jionkim@165.246.42.44:22 password">
+      <paths name="jionkim@165.246.42.44:22 p2m_reimp">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="jionkim@165.246.42.44:22 point2mesh">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />

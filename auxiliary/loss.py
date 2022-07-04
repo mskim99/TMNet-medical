@@ -37,6 +37,24 @@ def get_edge_loss_stage1(vertices,edge):
     return edge_loss
 
 
+def get_edge_loss_stage1_whmr(vertices, vertices_gt, edge, edge_gt):
+
+    # vertices bs*points_number*3 edge edge_number*2
+    vertices_edge = vertices.index_select(1,edge.view(-1)).\
+        view(vertices.size(0),edge.size(0),edge.size(1),vertices.size(2))
+    vertices_edge_vector = vertices_edge[:,:,0] - vertices_edge[:,:,1]
+
+    vertices_edge_gt = vertices.index_select(1, edge_gt.view(-1)). \
+        view(vertices_gt.size(0), edge_gt.size(0), edge_gt.size(1), vertices_gt.size(2))
+    vertices_edge_vector_gt = vertices_edge_gt[:, :, 0] - vertices_edge_gt[:, :, 1]
+
+    vertices_edge_len = torch.pow(vertices_edge_vector.norm(2,2),2)
+    vertices_edge_len_gt = torch.pow(vertices_edge_vector_gt.norm(2, 2), 2)
+
+    edge_loss = torch.abs(torch.mean(vertices_edge_len) - torch.mean(vertices_edge_len_gt))
+    return edge_loss
+
+
 def get_normal_loss(vertices, faces, gt_normals, idx2):
     idx2 = idx2.type(torch.cuda.LongTensor).detach()
     edges = torch.cat((faces[:,:,:2],faces[:,:,[0,2]],faces[:,:,1:]),1)
