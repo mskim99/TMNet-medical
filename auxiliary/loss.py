@@ -77,6 +77,14 @@ def get_normal_loss(vertices, faces, gt_normals, idx2):
     return normal_loss
 
 
+def get_normal_loss_mdf(vertices, faces, gt_normals, idx2):
+
+    el = vertices[:, edge[:, 1], :] - vertices[:, edge[:, 0], :]
+
+
+    return normal_loss
+
+
 def smoothness_loss_parameters(faces):
     # faces faces_number*3(array)
     print('calculating the smoothness loss parameters, gonna take a few moments')
@@ -239,3 +247,88 @@ def get_smoothness_loss(vertices, parameters,faces_bn,eps=1e-6):
     cos = torch.sum(cb1*cb2, dim=2) / (cb1l1 * cb2l1 + eps)
     loss = torch.sum((cos+1).pow(2)) / batch_size
     return loss
+
+
+def get_uniform_loss_global(vertices_gen, vertices_gt):
+
+    # Division of 3D space
+    # Using for uniform loss & detailed shape reconstruction
+    b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
+    b_v_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
+                           dtype=object)
+    b_v_list_gen = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
+                            dtype=object)
+    loss_part = np.zeros([(b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)])
+
+    orig_v_gen_num = float(vertices_gen.shape[0])
+    orig_v_gt_num = float(vertices_gt.shape[0])
+
+    '''
+    print(orig_v_gen_num)
+    print(orig_v_gt_num)
+    '''
+
+    b_v_idx = 0
+    for x_i in range(0, (b_range[0].shape[0] - 1)):
+        for y_i in range(0, (b_range[1].shape[0] - 1)):
+            for z_i in range(0, (b_range[2].shape[0] - 1)):
+
+                # Comparison between vertices of ground truth mesh
+                b_v_list_gt[b_v_idx] = []
+                for e_i in range(0, vertices_gt.shape[0]):
+                    if b_range[0][x_i] <= vertices_gt[e_i][0] < b_range[0][x_i + 1] and \
+                            b_range[1][y_i] <= vertices_gt[e_i][1] < b_range[0][y_i + 1] and \
+                            b_range[2][z_i] <= vertices_gt[e_i][2] < b_range[2][z_i + 1]:
+                        b_v_list_gt[b_v_idx].append(vertices_gt[e_i][:])
+                b_v_list_gt[b_v_idx] = np.array(b_v_list_gt[b_v_idx])
+
+                # Comparison between vertices of generated mesh
+                b_v_list_gen[b_v_idx] = []
+                for e_i in range(0, vertices_gen.shape[0]):
+                    if b_range[0][x_i] <= vertices_gen[e_i][0] < b_range[0][x_i + 1] and \
+                            b_range[1][y_i] <= vertices_gen[e_i][1] < b_range[0][y_i + 1] and \
+                            b_range[2][z_i] <= vertices_gen[e_i][2] < b_range[2][z_i + 1]:
+                        b_v_list_gen[b_v_idx].append(vertices_gen[e_i][:])
+                b_v_list_gen[b_v_idx] = np.array(b_v_list_gen[b_v_idx])
+
+                b_v_idx = b_v_idx + 1
+
+    v_num_gt_total = 0
+    v_num_gen_total = 0
+    for i in range(0, b_v_idx):
+
+        v_num_gt = float(b_v_list_gt[i].shape[0])
+        v_num_gen = float(b_v_list_gen[i].shape[0])
+        v_num_gt_total = v_num_gt_total + v_num_gt
+        v_num_gen_total = v_num_gen_total + v_num_gen
+
+        '''
+        print('Before')
+        print(v_num_gt)
+        print(v_num_gen)
+        '''
+
+        if orig_v_gt_num > orig_v_gen_num:
+            v_num_gt = v_num_gt * (orig_v_gen_num / orig_v_gt_num)
+        elif orig_v_gt_num < orig_v_gen_num:
+            v_num_gen = v_num_gen * (orig_v_gt_num / orig_v_gen_num)
+
+        loss_part[i] = (v_num_gen - v_num_gt) * (v_num_gen - v_num_gt) / v_num_gt
+
+        '''
+        print('After')
+        print(v_num_gt)
+        print(v_num_gen)
+        print(loss_part[i])
+        '''
+
+    gu_loss = np.average(loss_part)
+
+    '''
+    print('Total')
+    print(v_num_gt_total)
+    print(v_num_gen_total)
+    print(gu_loss)
+    '''
+
+    return gu_loss

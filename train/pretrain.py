@@ -14,6 +14,7 @@ import os
 import json
 import datetime
 import visdom
+from loss import *
 
 sys.path.append('./utils/')
 from losses import *
@@ -27,14 +28,14 @@ import torch
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=12)
-parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for')
+parser.add_argument('--nepoch', type=int, default=1, help='number of epochs to train for') # 120
 parser.add_argument('--model', type=str, default='', help='optional reload model path')
-parser.add_argument('--num_points', type=int, default=2500, help='number of points')
+parser.add_argument('--num_points', type=int, default=2500, help='number of points') # default : 2500
 parser.add_argument('--nb_primitives', type=int, default=1, help='number of primitives in the atlas')
 parser.add_argument('--super_points', type=int, default=2500,
-                    help='number of input points to pointNet, not used by default')
+                    help='number of input points to pointNet, not used by default') # default : 2500
 parser.add_argument('--env', type=str, default="pretrain", help='visdom environment')
-parser.add_argument('--lr',type=float,default=1e-6, help='initial learning rate')
+parser.add_argument('--lr',type=float,default=1e-5, help='initial learning rate')
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print(opt)
@@ -43,7 +44,7 @@ sys.path.append("./extension/")
 import dist_chamfer as ext
 distChamfer = ext.chamferDist()
 
-vis = visdom.Visdom(port=8887, env=opt.env)
+vis = visdom.Visdom(port=8886, env=opt.env)
 now = datetime.datetime.now()
 save_path = opt.env
 dir_name = os.path.join('./log', save_path)
@@ -58,7 +59,7 @@ torch.manual_seed(opt.manualSeed)
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
-dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=True, train=True, class_choice='lumbar_vertebra_05')
+dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=False, train=True, class_choice='lumbar_vertebra_05')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
                                          shuffle=True, num_workers=int(opt.workers))
 dataset_test = ShapeNet(npoints=opt.num_points, SVR=True, normal=False, train=False, class_choice='lumbar_vertebra_05')
@@ -80,7 +81,7 @@ lrate = opt.lr  # learning rate
 optimizer = optim.Adam([
     {'params': network.pc_encoder.parameters()},
     {'params': network.decoder.parameters()}
-], lr=lrate)
+], lr=lrate, weight_decay=0.05)
 
 # meters to record stats on learning
 train_loss = AverageValueMeter()
@@ -99,22 +100,22 @@ for epoch in range(opt.nepoch):
     train_loss.reset()
     network.train()
     # learning rate schedule
-    optimizer = optim.Adam([{'params': network.encoder.parameters()}, {'params': network.decoder.parameters()}], lr=lrate)
-    '''
+    # optimizer = optim.Adam([{'params': network.encoder.parameters()}, {'params': network.decoder.parameters()}], lr=lrate, weight_decay=0.05)
+
     if epoch == 100:
         optimizer = optim.Adam([
             {'params': network.pc_encoder.parameters()},
             {'params': network.decoder.parameters()}
-        ], lr=lrate/10.0)
+        ], lr=lrate/10.0, weight_decay=0.05)
+
     if epoch == 120:
-        optimizer = optim.Adam(network.encoder.parameters(), lr=lrate)
+        optimizer = optim.Adam(network.encoder.parameters(), lr=lrate, weight_decay=0.05)
     if epoch == 220:
-        optimizer = optim.Adam(network.encoder.parameters(), lr=lrate / 10.0)
-        '''
+        optimizer = optim.Adam(network.encoder.parameters(), lr=lrate / 10.0, weight_decay=0.05)
 
     for i, data in enumerate(dataloader, 0):
         optimizer.zero_grad()
-        img, points, normals, name, cat = data
+        img, points, normals, faces_gt, points_orig, name, cat = data
 
         img = volume_scaler.fit_transform(img.reshape(-1, img.shape[-1])).reshape(img.shape)
         img = torch.from_numpy(img).type(torch.FloatTensor)
@@ -147,11 +148,7 @@ for epoch in range(opt.nepoch):
             '''
 
         # END SUPER RESOLUTION
-        if epoch >= 0:
-            pointsRec = network(img, mode='img')
-        else:
-            points = torch.concat([points, points], dim=0)
-            pointsRec = network(points)  # forward pass
+        pointsRec = network(img, mode='img')
 
         pointsRec_max = torch.max(pointsRec, axis=1).values
         pointsRec_min = torch.min(pointsRec, axis=1).values
@@ -170,8 +167,13 @@ for epoch in range(opt.nepoch):
         edge_len_points = torch.Tensor(edge_len_points).cuda()
         edge_len_pointsRec = torch.Tensor(edge_len_pointsRec).cuda()
 
+        # print(pointsRec.shape)
+        # print(points.shape)
+
+        uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze(), points.transpose(2, 1).contiguous().squeeze())
+
         #  + 0.005 * L1_loss(edge_len_points, edge_len_pointsRec)
-        loss_net = 100.0 * (((torch.mean(dist1)) + (torch.mean(dist2))) + 0.0025 * L1_loss(edge_len_points, edge_len_pointsRec))
+        loss_net = (((torch.mean(dist1)) + (torch.mean(dist2))) + 0.0025 * L1_loss(edge_len_points, edge_len_pointsRec))
         loss_net.backward()
         train_loss.update(loss_net.item())
         optimizer.step()  # gradient update
@@ -203,7 +205,7 @@ for epoch in range(opt.nepoch):
     network.eval()
     with torch.no_grad():
         for i, data in enumerate(dataloader_test, 0):
-            img, points, normals, name, cat = data
+            img, points, normals, faces_gt, points_orig, name, cat = data
 
             img = volume_scaler.fit_transform(img.reshape(-1, img.shape[-1])).reshape(img.shape)
             img = torch.from_numpy(img).type(torch.FloatTensor)
@@ -228,8 +230,9 @@ for epoch in range(opt.nepoch):
             if epoch >= 0:
                 pointsRec = network(img, mode='img')
             else:
-                points = torch.concat([points, points], dim=0)
+                # points = torch.concat([points, points], dim=0)
                 pointsRec = network(points)  # forward pass
+                pointsRec = torch.squeez(pointsRec)
 
             pointsRec_max = torch.max(pointsRec, axis=1).values
             pointsRec_min = torch.min(pointsRec, axis=1).values
@@ -245,7 +248,9 @@ for epoch in range(opt.nepoch):
             edge_len_points = torch.Tensor(edge_len_points).cuda()
             edge_len_pointsRec = torch.Tensor(edge_len_pointsRec).cuda()
 
-            loss_net = 100.0 * (((torch.mean(dist1)) + (torch.mean(dist2))) + 0.0025 * L1_loss(edge_len_points, edge_len_pointsRec))
+            uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze(), points.transpose(2, 1).contiguous().squeeze())
+
+            loss_net = (((torch.mean(dist1)) + (torch.mean(dist2))) + 0.0025 * L1_loss(edge_len_points, edge_len_pointsRec))
             val_loss.update(loss_net.item())
             dataset_test.perCatValueMeter[cat[0]].update(loss_net.item())
             if i % 200 == 0:
@@ -287,5 +292,5 @@ for epoch in range(opt.nepoch):
     with open(logname, 'a') as f:  # open and append
         f.write('json_stats: ' + json.dumps(log_table) + '\n')
     torch.save(network.state_dict(), '%s/network.pth' % (dir_name))
-    joblib.dump(volume_scaler, '%s/volume_scaler.pkl' % (dir_name))
+    # joblib.dump(volume_scaler, '%s/volume_scaler.pkl' % (dir_name))
 

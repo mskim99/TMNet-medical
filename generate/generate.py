@@ -5,28 +5,34 @@ import numpy as np
 import torch
 import sys
 sys.path.append('./auxiliary/')
-from dataset import *
-from model import *
+from dataset_3D import *
+from model_3D import *
 from utils import *
 from ply import *
 import os
 import scipy.io as sio
 import pandas as pd
 from loss import *
+import meshio_custom
+import sklearn.preprocessing as sklp
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=6)
-parser.add_argument('--model', type=str, default = '',  help='your path to the trained model')
+parser.add_argument('--model', type=str, default = './log/SVR_subnet1_1/network.pth',  help='your path to the trained model')
 parser.add_argument('--num_points',type=int,default=10000)
 parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
 parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
-parser.add_argument('--num_vertices', type=int, default=2562)
-parser.add_argument('--subnet',type=int,default=3)
+parser.add_argument('--num_vertices', type=int, default=2562) # 2562
+parser.add_argument('--subnet',type=int,default=1)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
 sys.path.append("./extension/")
 import dist_chamfer as ext
@@ -37,17 +43,23 @@ print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
-dataset_test = ShapeNet(npoints=opt.num_points, SVR=True, normal=True, train=False,class_choice='chair')
+dataset_test = ShapeNet(npoints=opt.num_points, SVR=True, normal=True, train=False,class_choice='lumbar_vertebra_05')
 dataloader_test = torch.utils.data.DataLoader(dataset_test, batch_size=opt.batchSize,
                                          shuffle=False, num_workers=int(opt.workers))
 print('testing set', len(dataset_test.datapath))
 len_dataset = len(dataset_test)
 
 name = 'sphere' + str(opt.num_vertices) + '.mat'
-a = sio.loadmat('./data/' + name)
-faces = np.array(a['f'])
+mesh = sio.loadmat('./data/' + name)
+# name = 'sphere' + str(opt.num_vertices) + '.obj'
+# mesh = meshio_custom.read_obj('./data/' + name)
+
+faces = np.array(mesh['f'])
+# faces = mesh['faces']
 faces_cuda = torch.from_numpy(faces.astype(int)).type(torch.cuda.LongTensor)
-vertices_sphere = np.array(a['v'])
+
+vertices_sphere = np.array(mesh['v'])
+# vertices_sphere = mesh['vertices']
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0,1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 
@@ -66,10 +78,13 @@ network.eval()
 
 with torch.no_grad():
     for i, data in enumerate(dataloader_test, 0):
-        img, points, normals, name, cat = data
+        img, points, normals, faces_gt, points_orig, name, cat = data
         cat = cat[0]
         fn = name[0]
         img = img.cuda()
+        img = img.unsqueeze(dim=0)
+        img = img.float()
+
         points = points.cuda()
         choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
         points_choice = points[:, choice, :].contiguous()
@@ -81,6 +96,13 @@ with torch.no_grad():
         faces_cuda_bn = faces_cuda.unsqueeze(0)
         faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau, index, opt.pool)
         triangles_c1 = faces_cuda_bn[0].cpu().data.numpy()
+
+        pointsRec = torch.squeeze(pointsRec)
+        v10 = pointsRec[triangles_c1[:, 1]] - pointsRec[triangles_c1[:, 0]]
+        v20 = pointsRec[triangles_c1[:, 2]] - pointsRec[triangles_c1[:, 0]]
+        normals_gen = torch.cross(v10, v20)
+        normals_gen = normals_gen.cpu().data.numpy()
+        normals_gen = sklp.normalize(normals_gen, axis=1)
 
         ###################################################################################################
         if opt.subnet > 1:
@@ -151,14 +173,26 @@ with torch.no_grad():
             b_c3 = np.zeros((np.shape(triangles_c3_tosave)[0],4)) + 3
             b_c3[:,1:] = triangles_c3_tosave
 
+
+        meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn+"_GT.obj",
+                                points.cpu().data.squeeze().numpy(), triangles=faces_gt.cpu().data.squeeze().numpy().astype(int))
+        meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen.obj",
+                                pointsRec.cpu().data.squeeze().numpy(),
+                                triangles=faces, normals=normals_gen)
+        meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen_pruned.obj",
+                                pointsRec.cpu().data.squeeze().numpy(),
+                                triangles=triangles_c1, normals=normals_gen)
+
+        '''
         write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_GT",
                   points=pd.DataFrame(points.cpu().data.squeeze().numpy()), as_text=True)
         write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen",
                   points=pd.DataFrame(pointsRec.cpu().data.squeeze().numpy()), as_text=True,
-                  faces = pd.DataFrame(b.astype(int)))
+                  faces = pd.DataFrame(b.astype(int)), normal = True)
         write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen_pruned",
                   points=pd.DataFrame(pointsRec.cpu().data.squeeze().numpy()), as_text=True,
-                  faces = pd.DataFrame(b_c1.astype(int)))
+                  faces = pd.DataFrame(b_c1.astype(int)), normal = True)
+                    '''
         if opt.subnet>1:
             write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen2",
                       points=pd.DataFrame(pointsRec2.cpu().data.squeeze().numpy()), as_text=True,

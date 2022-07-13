@@ -16,23 +16,25 @@ import datetime
 import visdom
 import scipy.io as sio
 from loss import *
+import meshio_custom
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=12)
-parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for')
+parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for') # 120
 parser.add_argument('--epoch_decay', type=int, default=300, help='epoch to decay lr')
 parser.add_argument('--epoch_decay2', type=int, default=400, help='epoch to decay lr for the second time')
-parser.add_argument('--model', type=str, default='', help='model path from the pretrained model')
+parser.add_argument('--model', type=str, default='./log/SVR_subnet1_usage/network.pth', help='model path from the pretrained model')
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud') # 10000
 parser.add_argument('--num_vertices', type=int, default=2562, help='number of vertices of the initial sphere')
-parser.add_argument('--num_samples',type=int,default=2500, help='number of samples for error estimation')
-parser.add_argument('--env', type=str, default="SVR_subnet1_3", help='visdom env')
-parser.add_argument('--lr', type=float, default=1e-6, help='initial learning rate')
+parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation') # 2500
+parser.add_argument('--env', type=str, default="SVR_subnet1_1", help='visdom env')
+parser.add_argument('--lr', type=float, default=1e-5, help='initial learning rate')
 parser.add_argument('--tau', type=float, default=0.1, help='threshold to prune the faces')
-parser.add_argument('--lambda_edge', type=float, default=0.05, help='weight of edge loss')
-parser.add_argument('--lambda_smooth', type=float, default=5e-7, help='weight of smooth loss')
+parser.add_argument('--lambda_edge', type=float, default=1e-5, help='weight of edge loss') # 0.05
+parser.add_argument('--lambda_smooth', type=float, default=5e-9, help='weight of smooth loss')
 parser.add_argument('--lambda_normal', type=float, default=1e-3, help='weight of normal loss')
+parser.add_argument('--lambda_uniform_glob', type=float, default=1e-4, help='weight of global uniform loss')
 parser.add_argument('--pool', type=str, default='max', help='max or mean or sum')
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
@@ -43,7 +45,7 @@ import dist_chamfer as ext
 distChamfer = ext.chamferDist()
 
 server = 'http://localhost/'
-vis = visdom.Visdom(server=server, port=8887, env=opt.env, use_incoming_socket=False)
+vis = visdom.Visdom(server=server, port=8886, env=opt.env, use_incoming_socket=False)
 now = datetime.datetime.now()
 save_path = opt.env
 dir_name = os.path.join('./log', save_path)
@@ -55,7 +57,6 @@ print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
@@ -71,9 +72,16 @@ len_dataset = len(dataset)
 
 name = 'sphere' + str(opt.num_vertices) + '.mat'
 mesh = sio.loadmat('./data/' + name)
+# name = 'sphere' + str(opt.num_vertices) + '.obj'
+# mesh = meshio_custom.read_obj('./data/' + name)
+
 faces = np.array(mesh['f'])
+# faces = mesh['faces']
 faces_cuda = torch.from_numpy(faces.astype(int)).type(torch.cuda.LongTensor)
+
 vertices_sphere = np.array(mesh['v'])
+# vertices_sphere = mesh['vertices']
+
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0, 1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 edge_cuda = get_edges(faces)
@@ -97,7 +105,7 @@ optimizer = optim.Adam([
     {'params': network.encoder.parameters()},
     {'params': network.estimate.parameters()},
     {'params': network.decoder.parameters()}
-], lr=lrate)
+], lr=lrate, weight_decay=0.1)
 
 train_CD_loss = AverageValueMeter()
 val_CD_loss = AverageValueMeter()
@@ -130,14 +138,14 @@ for epoch in range(opt.nepoch):
             {'params': network.encoder.parameters()},
             {'params': network.estimate.parameters()},
             {'params': network.decoder.parameters()}
-        ], lr=lrate / 10.0)
+        ], lr=lrate / 10.0, weight_decay=0.1)
 
     if epoch == opt.epoch_decay2:
         optimizer = optim.Adam([
             {'params': network.encoder.parameters()},
             {'params': network.estimate.parameters()},
             {'params': network.decoder.parameters()}
-        ], lr=lrate / 100.0)
+        ], lr=lrate / 100.0, weight_decay=0.1)
 
     torch.manual_seed(0)
 
@@ -183,8 +191,10 @@ for epoch in range(opt.nepoch):
         faces_cuda_bn = faces_cuda.unsqueeze(0).expand(pointsRec.size(0), faces_cuda.size(0),faces_cuda.size(1))
         normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
 
-        # + opt.lambda_smooth * smoothness_loss \
-        loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss
+        uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+
+        loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform_glob * uniform_loss_global
+        # loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_smooth * smoothness_loss
 
         loss_net.backward()
         train_CD_loss.update(CD_loss.item())
@@ -209,8 +219,8 @@ for epoch in range(opt.nepoch):
                             markersize=2,
                         ),
                         )
-        print('[%d: %d/%d] train_cd_loss:  %f , l2_loss: %f, edge_loss: %f, smoothness_loss: %f, normal_loss: %f, loss_net: %f' %
-              (epoch, i, len_dataset / opt.batchSize, CD_loss.item(),l2_loss.item(), edge_loss.item(), smoothness_loss.item(), normal_loss.item(), loss_net.item()))
+        print('[%d: %d/%d] train_cd_loss:  %f , l2_loss: %f, edge_loss: %f, smoothness_loss: %f, normal_loss: %f uniform_loss_global: %f, loss_net: %f' %
+              (epoch, i, len_dataset / opt.batchSize, CD_loss.item(),l2_loss.item(), edge_loss.item(), smoothness_loss.item(), normal_loss.item(), uniform_loss_global, loss_net.item()))
 
     train_CD_curve.append(train_CD_loss.avg)
     train_CDs_curve.append(train_CDs_loss.avg)
@@ -247,7 +257,7 @@ for epoch in range(opt.nepoch):
             pointsRec_min = torch.min(pointsRec, axis=1).values
             pointsRec = (pointsRec - pointsRec_min) / (pointsRec_max - pointsRec_min + 1e-4)
             '''
-            dist1, dist2, _, idx2 = distChamfer(points_choice, pointsRec)
+            dist1, dist2, idx1, idx2 = distChamfer(points_choice, pointsRec)
 
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
             dist1_samples, dist2_samples, _, _ = distChamfer(points, pointsRec_samples)
@@ -262,8 +272,11 @@ for epoch in range(opt.nepoch):
             CDs_loss = (torch.mean(dist1_samples)) + (torch.mean(dist2_samples))
             faces_cuda_bn = faces_cuda.unsqueeze(0).expand(error.size(0), faces_cuda.size(0), faces_cuda.size(1))
             normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
-            # + opt.lambda_smooth * smoothness_loss \
-            loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss
+
+            uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+
+            loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform_glob * uniform_loss_global
+            # loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_smooth * smoothness_loss
 
             val_CD_loss.update(CD_loss.item())
             dataset_test.perCatValueMeter[cat[0]].update(CDs_loss.item())
@@ -287,8 +300,8 @@ for epoch in range(opt.nepoch):
                             ),
                             )
 
-            print('[%d: %d/%d] val_cd_loss:  %f , l2_loss: %f, edge_loss: %f, smoothness_loss: %f, normal_loss: %f, loss_net: %f'
-                  % (epoch, i, len(dataset_test) / opt.batchSize, CD_loss.item(), l2_loss.item(), edge_loss.item(), smoothness_loss.item(), normal_loss.item(), loss_net.item()))
+            print('[%d: %d/%d] val_cd_loss:  %f , l2_loss: %f, edge_loss: %f, smoothness_loss: %f, normal_loss: %f, uniform_loss_global: %f, loss_net: %f'
+                  % (epoch, i, len(dataset_test) / opt.batchSize, CD_loss.item(), l2_loss.item(), edge_loss.item(), smoothness_loss.item(), normal_loss.item(), uniform_loss_global, loss_net.item()))
 
         val_CD_curve.append(val_CD_loss.avg)
         val_l2_curve.append(val_l2_loss.avg)

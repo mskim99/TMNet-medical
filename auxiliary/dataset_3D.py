@@ -9,6 +9,7 @@ import meshio_custom
 import time
 import glob
 import math
+import sklearn.preprocessing as sklp
 
 class ShapeNet(data.Dataset):
     def __init__(self,
@@ -106,9 +107,14 @@ class ShapeNet(data.Dataset):
                 v10 = points_origin[faces_sampled[i, 1]] - points_origin[faces_sampled[i, 0]]
                 v20 = points_origin[faces_sampled[i, 2]] - points_origin[faces_sampled[i, 0]]
                 normals_sampled[i, :] = np.cross(v10, v20)
-                # normals = normals[indices,:]
+            normals_sampled = sklp.normalize(normals_sampled, axis=1)
         else:
             normals_sampled = 0
+
+        # Resize to np.array([10000, 3])
+        # points_origin = np.concatenate([points_origin, np.zeros([(15000 - points_origin.shape[0]), 3])], axis=0)
+        # points_origin = np.zeros([1])
+        # print(points_origin.shape)
 
         cat = fn[2]
         name = fn[3]

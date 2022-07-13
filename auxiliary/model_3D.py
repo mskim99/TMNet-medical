@@ -12,7 +12,7 @@ class STN3d(nn.Module):
     def __init__(self, num_points = 2500):
         super(STN3d, self).__init__()
         self.num_points = num_points
-        self.conv1 = torch.nn.Conv1d(3, 64, 1)
+        self.conv1 = torch.nn.Conv1d(1, 64, 1)
         self.conv2 = torch.nn.Conv1d(64, 128, 1)
         self.conv3 = torch.nn.Conv1d(128, 1024, 1)
         self.fc1 = nn.Linear(1024, 512)
@@ -52,10 +52,6 @@ class PointNetfeat(nn.Module):
         self.bn3 = torch.nn.BatchNorm1d(256)
         self.bn4 = torch.nn.BatchNorm1d(512)
         self.bn5 = torch.nn.BatchNorm1d(1024)
-        self.dropout1 = nn.Dropout(0.5)
-        self.dropout2 = nn.Dropout(0.5)
-        self.dropout3 = nn.Dropout(0.5)
-        self.dropout4 = nn.Dropout(0.5)
         self.trans = trans
         self.num_points = num_points
         self.global_feat = global_feat
@@ -67,16 +63,12 @@ class PointNetfeat(nn.Module):
             x = torch.bmm(x, trans)
             x = x.transpose(2,1)
         x = F.relu(self.bn1(self.conv1(x)))
-        x = self.dropout1(x)
         pointfeat = x
         x = F.relu(self.bn2(self.conv2(x)))
-        x = self.dropout2(x)
         x = F.relu(self.bn3(self.conv3(x)))
-        x = self.dropout3(x)
         x = F.relu(self.bn4(self.conv4(x)))
-        x = self.dropout4(x)
         x = self.bn5(self.conv5(x))
-        x,_ = torch.max(x, 2)
+        # x,_ = torch.max(x, 2)
         x = x.view(-1, 1024)
         if self.trans:
             if self.global_feat:
@@ -118,19 +110,19 @@ class DeformNet(nn.Module):
         '''
         self.conv1 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size, 1)
         self.conv2 = torch.nn.Conv1d(self.bottleneck_size, (self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), 1)
-        self.conv2_3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), 1)
+        # self.conv2_3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), 1)
         self.conv3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
-        self.conv3_4 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
+        # self.conv3_4 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
         self.conv4 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), (self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), 1)
-        self.conv4_5 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), 1)
+        # self.conv4_5 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), 1)
         self.conv5 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), self.bottleneck_size // 2, 1)
-        self.conv5_6 = torch.nn.Conv1d(self.bottleneck_size // 2, self.bottleneck_size // 2, 1)
+        # self.conv5_6 = torch.nn.Conv1d(self.bottleneck_size // 2, self.bottleneck_size // 2, 1)
         self.conv6 = torch.nn.Conv1d(self.bottleneck_size // 2, (self.bottleneck_size // 2 - self.bottleneck_size // 8), 1)
-        self.conv6_7 = torch.nn.Conv1d((self.bottleneck_size // 2 - self.bottleneck_size // 8), (self.bottleneck_size // 2 - self.bottleneck_size // 8), 1)
+        # self.conv6_7 = torch.nn.Conv1d((self.bottleneck_size // 2 - self.bottleneck_size // 8), (self.bottleneck_size // 2 - self.bottleneck_size // 8), 1)
         self.conv7 = torch.nn.Conv1d((self.bottleneck_size // 2 - self.bottleneck_size // 8), self.bottleneck_size // 4, 1)
-        self.conv7_8 = torch.nn.Conv1d(self.bottleneck_size // 4, self.bottleneck_size // 4, 1)
+        # self.conv7_8 = torch.nn.Conv1d(self.bottleneck_size // 4, self.bottleneck_size // 4, 1)
         self.conv8 = torch.nn.Conv1d(self.bottleneck_size // 4, self.bottleneck_size // 8, 1)
-        self.conv8_9 = torch.nn.Conv1d(self.bottleneck_size // 8, self.bottleneck_size // 8, 1)
+        # self.conv8_9 = torch.nn.Conv1d(self.bottleneck_size // 8, self.bottleneck_size // 8, 1)
         self.conv9 = torch.nn.Conv1d(self.bottleneck_size // 8, 3, 1)
 
         self.bn1 = torch.nn.BatchNorm1d(self.bottleneck_size)
@@ -145,8 +137,6 @@ class DeformNet(nn.Module):
 
         # self.fc = nn.Linear(14508, 7500)
         self.th = nn.Tanh()
-
-        self.dropout = [nn.Dropout(0.0), nn.Dropout(0.0), nn.Dropout(0.0)]
 
         self.maxpool = torch.nn.MaxPool3d(kernel_size=3, stride=2, padding=1)
 
@@ -183,49 +173,29 @@ class DeformNet(nn.Module):
         '''
 
         '''
-        # print(x.shape)
         x = F.relu(self.bn1(self.conv1(x)))
-        x = self.dropout[drp_idx](x)
         x = F.relu(self.bn2(self.conv2(x)))
-        x = self.dropout[drp_idx](x)
-        x = F.relu(self.bn2(self.conv2_3(x)))
-        x = self.dropout[drp_idx](x)
+        # x = F.relu(self.bn2(self.conv2_3(x)))
         x = F.relu(self.bn3(self.conv3(x)))
-        x = self.dropout[drp_idx](x)
-        x = F.relu(self.bn3(self.conv3_4(x)))
-        x = self.dropout[drp_idx](x)
+        # x = F.relu(self.bn3(self.conv3_4(x)))
         x = F.relu(self.bn4(self.conv4(x)))
-        x = self.dropout[drp_idx](x)
-        x = F.relu(self.bn4(self.conv4_5(x)))
-        x = self.dropout[drp_idx](x)
+        # x = F.relu(self.bn4(self.conv4_5(x)))
         x = F.relu(self.bn5(self.conv5(x)))
-        x = self.dropout[drp_idx](x)
-        x = F.relu(self.bn5(self.conv5_6(x)))
-        x = self.dropout[drp_idx](x)
+        # x = F.relu(self.bn5(self.conv5_6(x)))
         x = F.relu(self.bn6(self.conv6(x)))
-        x = self.dropout[drp_idx](x)
-        x = F.relu(self.bn6(self.conv6_7(x)))
-        x = self.dropout[drp_idx](x)
+        # x = F.relu(self.bn6(self.conv6_7(x)))
         x = F.relu(self.bn7(self.conv7(x)))
-        x = self.dropout[drp_idx](x)
-        x = F.relu(self.bn7(self.conv7_8(x)))
-        x = self.dropout[drp_idx](x)
+        # x = F.relu(self.bn7(self.conv7_8(x)))
         x = F.relu(self.bn8(self.conv8(x)))
-        x = self.dropout[drp_idx](x)
-        x = F.relu(self.bn8(self.conv8_9(x)))
-        x = self.dropout[drp_idx](x)
+        # x = F.relu(self.bn8(self.conv8_9(x)))
         x = self.th(self.conv9(x))
         '''
 
         # Original Code
         x = F.relu(self.bn1(self.conv1(x)))
-        x = self.dropout[drp_idx](x)
         x = F.relu(self.bn2(self.conv2(x)))
-        x = self.dropout[drp_idx](x)
         x = F.relu(self.bn3(self.conv3(x)))
-        x = self.dropout[drp_idx](x)
         x = F.relu(self.bn4(self.conv4(x)))
-        x = self.dropout[drp_idx](x)
         x = self.th(self.conv5(x))
 
         return x
@@ -426,7 +396,7 @@ class SVR_TMNet(nn.Module):
         if mode == 'deform1':
             outs = self.decoder[0](y, 0)
         elif mode == 'deform2':
-            outs = self.decoder2[0](y)
+            outs = self.decoder2[0](y, 0)
             outs = outs + points
         elif mode == 'estimate':
             outs = self.estimate(y)
@@ -453,7 +423,7 @@ class Pretrain(nn.Module):
         nn.BatchNorm1d(self.bottleneck_size),
         nn.ReLU()
         )
-        self.encoder = resnet_3D.resnet101_3D(num_classes=self.bottleneck_size)
+        self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
         self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
 
     def forward(self, x, mode='point'):
