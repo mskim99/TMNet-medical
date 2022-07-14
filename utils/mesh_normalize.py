@@ -13,13 +13,14 @@ points_max = np.max(points_origin, axis=0)
 points_min = np.min(points_origin, axis=0)
 points_origin = (points_origin - points_min) / (points_max - points_min)
 
+normals_origin = np.zeros(points_origin.shape)
 v10 = points_origin[faces_origin[:, 1]] - points_origin[faces_origin[:, 0]]
 v20 = points_origin[faces_origin[:, 2]] - points_origin[faces_origin[:, 0]]
-normals_origin = np.cross(v10, v20)
-normals_origin = sklp.normalize(normals_origin, axis=1)
+normals_origin_value = np.cross(v10, v20)
+normals_origin[faces_origin[:,0]] += normals_origin_value[:]
+normals_origin[faces_origin[:,1]] += normals_origin_value[:]
+normals_origin[faces_origin[:,2]] += normals_origin_value[:]
+normals_origin_len = np.sqrt(normals_origin[:,0]*normals_origin[:,0]+normals_origin[:,1]*normals_origin[:,1]+normals_origin[:,2]*normals_origin[:,2])
+normals_origin = normals_origin / normals_origin_len.reshape(-1, 1)
 
-print(points_origin.shape)
-print(faces_origin.shape)
-print(normals_origin.shape)
-
-mesh = meshio_custom.write_obj('./f_034_vrt_24_norm.obj', points_origin, faces_origin, None, normals_origin)
+mesh = meshio_custom.write_obj('./f_034_vrt_24_norm2.obj', points_origin, faces_origin, None, normals_origin)

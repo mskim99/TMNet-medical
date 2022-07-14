@@ -159,6 +159,9 @@ for epoch in range(opt.nepoch):
 
         dist1, dist2, idx1, idx2 = distChamfer(points.transpose(2, 1).contiguous(), pointsRec)  # loss function
 
+        print(idx1)
+        print(idx2)
+
         idx1_ln = idx1.long().unsqueeze(1).cpu().numpy()
         idx2_ln = idx2.long().unsqueeze(1).cpu().numpy()
 

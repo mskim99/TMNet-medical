@@ -20,19 +20,19 @@ import sklearn.preprocessing as sklp
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=6)
-parser.add_argument('--model', type=str, default = './log/SVR_subnet1_1/network.pth',  help='your path to the trained model')
+parser.add_argument('--model', type=str, default = './log/SVR_subnet3_usage/network.pth',  help='your path to the trained model')
 parser.add_argument('--num_points',type=int,default=10000)
 parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
-parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
+parser.add_argument('--pool',type=str,default='sum',help='max or mean or sum' )
 parser.add_argument('--num_vertices', type=int, default=2562) # 2562
-parser.add_argument('--subnet',type=int,default=1)
+parser.add_argument('--subnet',type=int,default=2)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 sys.path.append("./extension/")
 import dist_chamfer as ext
@@ -91,6 +91,9 @@ with torch.no_grad():
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                  vertices_sphere.size(2)).contiguous())
         pointsRec  = network(img, vertices_input,mode='deform1')
+
+        dist1, dist2, _, idx2 = distChamfer(points.float() , pointsRec.float()) # PointsRec > Points
+
         pointsRec_samples, index = samples_random(faces_cuda, pointsRec, opt.num_points)
         error = network(img, pointsRec_samples.detach().transpose(1, 2),mode='estimate')
         faces_cuda_bn = faces_cuda.unsqueeze(0)
@@ -98,11 +101,23 @@ with torch.no_grad():
         triangles_c1 = faces_cuda_bn[0].cpu().data.numpy()
 
         pointsRec = torch.squeeze(pointsRec)
+        normals_gen = torch.zeros(pointsRec.shape).cuda()
         v10 = pointsRec[triangles_c1[:, 1]] - pointsRec[triangles_c1[:, 0]]
         v20 = pointsRec[triangles_c1[:, 2]] - pointsRec[triangles_c1[:, 0]]
-        normals_gen = torch.cross(v10, v20)
-        normals_gen = normals_gen.cpu().data.numpy()
-        normals_gen = sklp.normalize(normals_gen, axis=1)
+        normals_gen_value = torch.cross(v10, v20)
+        normals_gen[triangles_c1[:,0]] += normals_gen_value[:]
+        normals_gen[triangles_c1[:,1]] += normals_gen_value[:]
+        normals_gen[triangles_c1[:,2]] += normals_gen_value[:]
+        normals_gen_len = torch.sqrt(normals_gen[:,0]*normals_gen[:,0]+normals_gen[:,1]*normals_gen[:,1]+normals_gen[:,2]*normals_gen[:,2])
+        normals_gen = normals_gen / normals_gen_len.reshape(-1, 1)
+        pointsRec = torch.unsqueeze(pointsRec, 0)
+
+        # Validate normal flip
+        '''
+        for i in range (0, normals_gen.shape[0] - 1):
+            if torch.dot(normals_gen[i, :].cpu().float(), normals[0, idx2[0, i], :].float()).item() < 0.0:
+                normals_gen[i, :] = -normals_gen[i, :]
+                '''
 
         ###################################################################################################
         if opt.subnet > 1:
@@ -112,6 +127,14 @@ with torch.no_grad():
             faces_cuda_bn = faces_cuda_bn.clone()
             faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau/opt.tau_decay, index, opt.pool)
             triangles_c2 = faces_cuda_bn[0].cpu().data.numpy()
+
+            pointsRec2 = torch.squeeze(pointsRec2)
+            v10 = pointsRec2[triangles_c2[:, 1]] - pointsRec2[triangles_c2[:, 0]]
+            v20 = pointsRec2[triangles_c2[:, 2]] - pointsRec2[triangles_c2[:, 0]]
+            normals_gen2 = torch.cross(v10, v20)
+            normals_gen2 = normals_gen2.cpu().data.numpy()
+            normals_gen2 = sklp.normalize(normals_gen2, axis=1)
+            pointsRec2 = torch.unsqueeze(pointsRec2, 0)
 
         ###################################################################################################
         if opt.subnet > 2:
@@ -194,12 +217,20 @@ with torch.no_grad():
                   faces = pd.DataFrame(b_c1.astype(int)), normal = True)
                     '''
         if opt.subnet>1:
+            '''
             write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen2",
                       points=pd.DataFrame(pointsRec2.cpu().data.squeeze().numpy()), as_text=True,
                       faces = pd.DataFrame(b_c1.astype(int)))
             write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen2_pruned",
                       points=pd.DataFrame(pointsRec2.cpu().data.squeeze().numpy()), as_text=True,
                       faces = pd.DataFrame(b_c2.astype(int)))
+                      '''
+            meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2.obj",
+                                    pointsRec2.cpu().data.squeeze().numpy(),
+                                    triangles=triangles_c1, normals=normals_gen2)
+            meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2_pruned.obj",
+                                    pointsRec2.cpu().data.squeeze().numpy(),
+                                    triangles=triangles_c2, normals=normals_gen2)
         if opt.subnet>2:
             write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen3",
                       points=pd.DataFrame(pointsRec3.cpu().data.squeeze().numpy()), as_text=True,

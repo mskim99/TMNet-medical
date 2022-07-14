@@ -28,7 +28,7 @@ parser.add_argument('--model', type=str, default='./log/SVR_subnet1_usage/networ
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud') # 10000
 parser.add_argument('--num_vertices', type=int, default=2562, help='number of vertices of the initial sphere')
 parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation') # 2500
-parser.add_argument('--env', type=str, default="SVR_subnet1_1", help='visdom env')
+parser.add_argument('--env', type=str, default="SVR_subnet1_3", help='visdom env')
 parser.add_argument('--lr', type=float, default=1e-5, help='initial learning rate')
 parser.add_argument('--tau', type=float, default=0.1, help='threshold to prune the faces')
 parser.add_argument('--lambda_edge', type=float, default=1e-5, help='weight of edge loss') # 0.05
@@ -58,7 +58,7 @@ random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=True, train=True, class_choice='lumbar_vertebra_05')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
@@ -147,6 +147,15 @@ for epoch in range(opt.nepoch):
             {'params': network.decoder.parameters()}
         ], lr=lrate / 100.0, weight_decay=0.1)
 
+    '''
+    if epoch > 40 and epoch <= 80:
+        opt.lambda_uniform_glob = 5e-4
+    if epoch > 80 and epoch <= 120:
+        opt.lambda_uniform_glob = 1e-3
+    if epoch >= 120:
+        opt.lambda_uniform_glob = 5e-3
+        '''
+
     torch.manual_seed(0)
 
     for i, data in enumerate(dataloader, 0):
@@ -165,14 +174,11 @@ for epoch in range(opt.nepoch):
         choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
         points_choice = points[:, choice, :].contiguous()
         points_choice = points_choice.float()
+        normals_choice = normals[:, choice, :].contiguous()
+        normals_choice = normals_choice.float()
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                  vertices_sphere.size(2)).contiguous())
         pointsRec = network(img, vertices_input, mode='deform1')  # vertices_sphere 3*2562
-        '''
-        pointsRec_max = torch.max(pointsRec, axis=1).values
-        pointsRec_min = torch.min(pointsRec, axis=1).values
-        pointsRec = (pointsRec - pointsRec_min) / (pointsRec_max - pointsRec_min + 1e-4)
-        '''
 
         dist1, dist2, _, idx2 = distChamfer(points_choice, pointsRec)
 
@@ -182,6 +188,18 @@ for epoch in range(opt.nepoch):
         error_GT = torch.sqrt(dist2_samples.detach()[:,choice2])
         error = network(img, pointsRec_samples.detach()[:,choice2].transpose(1, 2), mode='estimate')
 
+        pointsRec = torch.squeeze(pointsRec)
+        normals_gen = torch.ones(pointsRec.shape).cuda()
+        v10 = pointsRec[faces_cuda[:, 1]] - pointsRec[faces_cuda[:, 0]]
+        v20 = pointsRec[faces_cuda[:, 2]] - pointsRec[faces_cuda[:, 0]]
+        normals_gen_value = torch.cross(v10, v20)
+        normals_gen[faces_cuda[:,0]] += normals_gen_value[:]
+        normals_gen[faces_cuda[:,1]] += normals_gen_value[:]
+        normals_gen[faces_cuda[:,2]] += normals_gen_value[:]
+        normals_gen_len = torch.sqrt(normals_gen[:,0]*normals_gen[:,0]+normals_gen[:,1]*normals_gen[:,1]+normals_gen[:,2]*normals_gen[:,2])
+        normals_gen = normals_gen / normals_gen_len.reshape(-1, 1)
+        pointsRec = torch.unsqueeze(pointsRec, 0)
+
         CD_loss = torch.mean(dist1) + torch.mean(dist2)
         CDs_loss = torch.mean(dist1_samples) + torch.mean(dist2_samples)
         l2_loss = calculate_l2_loss(error, error_GT.detach())
@@ -189,7 +207,8 @@ for epoch in range(opt.nepoch):
         edge_loss = get_edge_loss_stage1_whmr(pointsRec, points_orig, edge_cuda, edge_cuda_gt)
         smoothness_loss = get_smoothness_loss_stage1(pointsRec, parameters)
         faces_cuda_bn = faces_cuda.unsqueeze(0).expand(pointsRec.size(0), faces_cuda.size(0),faces_cuda.size(1))
-        normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
+        # normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
+        normal_loss = get_normal_loss_mdf(normals_gen, normals_choice, idx2)
 
         uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
 
@@ -252,17 +271,25 @@ for epoch in range(opt.nepoch):
             vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                      vertices_sphere.size(2)).contiguous())
             pointsRec = network(img, vertices_input, mode='deform1')  # points_sphere 3*2562
-            '''
-            pointsRec_max = torch.max(pointsRec, axis=1).values
-            pointsRec_min = torch.min(pointsRec, axis=1).values
-            pointsRec = (pointsRec - pointsRec_min) / (pointsRec_max - pointsRec_min + 1e-4)
-            '''
+
             dist1, dist2, idx1, idx2 = distChamfer(points_choice, pointsRec)
 
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
             dist1_samples, dist2_samples, _, _ = distChamfer(points, pointsRec_samples)
             error_GT = torch.sqrt(dist2_samples)
             error = network(img, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
+
+            pointsRec = torch.squeeze(pointsRec)
+            normals_gen = torch.ones(pointsRec.shape).cuda()
+            v10 = pointsRec[faces_cuda[:, 1]] - pointsRec[faces_cuda[:, 0]]
+            v20 = pointsRec[faces_cuda[:, 2]] - pointsRec[faces_cuda[:, 0]]
+            normals_gen_value = torch.cross(v10, v20)
+            normals_gen[faces_cuda[:, 0]] += normals_gen_value[:]
+            normals_gen[faces_cuda[:, 1]] += normals_gen_value[:]
+            normals_gen[faces_cuda[:, 2]] += normals_gen_value[:]
+            normals_gen_len = torch.sqrt(normals_gen[:, 0] * normals_gen[:, 0] + normals_gen[:, 1] * normals_gen[:, 1] + normals_gen[:, 2] * normals_gen[:, 2])
+            normals_gen = normals_gen / normals_gen_len.reshape(-1, 1)
+            pointsRec = torch.unsqueeze(pointsRec, 0)
 
             CD_loss = torch.mean(dist1) + torch.mean(dist2)
             # edge_loss = get_edge_loss_stage1(pointsRec, edge_cuda.detach())
@@ -271,7 +298,8 @@ for epoch in range(opt.nepoch):
             l2_loss = calculate_l2_loss(error, error_GT.detach())
             CDs_loss = (torch.mean(dist1_samples)) + (torch.mean(dist2_samples))
             faces_cuda_bn = faces_cuda.unsqueeze(0).expand(error.size(0), faces_cuda.size(0), faces_cuda.size(1))
-            normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
+            # normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
+            normal_loss = get_normal_loss_mdf(normals_gen, normals, idx2)
 
             uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
 

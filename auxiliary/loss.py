@@ -77,11 +77,15 @@ def get_normal_loss(vertices, faces, gt_normals, idx2):
     return normal_loss
 
 
-def get_normal_loss_mdf(vertices, faces, gt_normals, idx2):
+def get_normal_loss_mdf(gen_normals, gt_normals, idx2):
 
-    el = vertices[:, edge[:, 1], :] - vertices[:, edge[:, 0], :]
+    normal_loss = 0.0
+    for i in range(0, gen_normals.shape[0]):
+        diff = gen_normals[i, :] - gt_normals[0, idx2[0, i], :]
+        diff = torch.sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2])
+        normal_loss = normal_loss + diff
 
-
+    normal_loss = normal_loss / gen_normals.shape[0]
     return normal_loss
 
 
@@ -295,6 +299,7 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
 
     v_num_gt_total = 0
     v_num_gen_total = 0
+    b_v_num_valid = b_v_idx
     for i in range(0, b_v_idx):
 
         v_num_gt = float(b_v_list_gt[i].shape[0])
@@ -313,7 +318,11 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
         elif orig_v_gt_num < orig_v_gen_num:
             v_num_gen = v_num_gen * (orig_v_gt_num / orig_v_gen_num)
 
-        loss_part[i] = (v_num_gen - v_num_gt) * (v_num_gen - v_num_gt) / v_num_gt
+        if v_num_gt > 0.:
+            loss_part[i] = (v_num_gen - v_num_gt) * (v_num_gen - v_num_gt) / v_num_gt
+        else:
+            loss_part[i] = 0.
+            b_v_num_valid = b_v_num_valid - 1
 
         '''
         print('After')
@@ -322,7 +331,7 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
         print(loss_part[i])
         '''
 
-    gu_loss = np.average(loss_part)
+    gu_loss = np.sum(loss_part) / float(b_v_num_valid)
 
     '''
     print('Total')
@@ -331,4 +340,11 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
     print(gu_loss)
     '''
 
-    return gu_loss
+    return gu_loss# , b_v_list_gen, b_v_list_gt
+'''
+def get_uniform_loss_local(b_v_list_gen, b_v_list_gt):
+
+    
+
+    return 0.0
+    '''

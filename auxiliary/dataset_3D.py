@@ -102,14 +102,28 @@ class ShapeNet(data.Dataset):
         faces_sampled = faces_origin[indices,:]
         if self.normal:
             # normals = mesh.get_cells_type("triangle")
+            '''
             normals_sampled = np.zeros([self.npoints, 3])
             for i in range(0, self.npoints):
                 v10 = points_origin[faces_sampled[i, 1]] - points_origin[faces_sampled[i, 0]]
                 v20 = points_origin[faces_sampled[i, 2]] - points_origin[faces_sampled[i, 0]]
                 normals_sampled[i, :] = np.cross(v10, v20)
             normals_sampled = sklp.normalize(normals_sampled, axis=1)
+            '''
+            normals_origin = np.zeros(points_origin.shape)
+            v10 = points_origin[faces_origin[:, 1]] - points_origin[faces_origin[:, 0]]
+            v20 = points_origin[faces_origin[:, 2]] - points_origin[faces_origin[:, 0]]
+            normals_origin_value = np.cross(v10, v20)
+            normals_origin[faces_origin[:, 0]] += normals_origin_value[:]
+            normals_origin[faces_origin[:, 1]] += normals_origin_value[:]
+            normals_origin[faces_origin[:, 2]] += normals_origin_value[:]
+            normals_origin_len = np.sqrt(normals_origin[:, 0] * normals_origin[:, 0] + \
+                                         normals_origin[:, 1] * normals_origin[:, 1] + \
+                                         normals_origin[:, 2] * normals_origin[:, 2])
+            normals_origin = normals_origin / normals_origin_len.reshape(-1, 1)
+
         else:
-            normals_sampled = 0
+            normals_origin = 0
 
         # Resize to np.array([10000, 3])
         # points_origin = np.concatenate([points_origin, np.zeros([(15000 - points_origin.shape[0]), 3])], axis=0)
@@ -137,7 +151,7 @@ class ShapeNet(data.Dataset):
                 vol_data[v_idx] = stack_data[m_idx]
         else:
             vol_data = 0
-        return vol_data, points_sampled, normals_sampled, faces_sampled, points_origin, name, cat
+        return vol_data, points_sampled, normals_origin, faces_sampled, points_origin, name, cat
 
     def __len__(self):
         return len(self.datapath)
