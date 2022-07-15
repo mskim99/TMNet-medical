@@ -28,8 +28,8 @@ import torch
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=12)
-parser.add_argument('--nepoch', type=int, default=1, help='number of epochs to train for') # 120
-parser.add_argument('--model', type=str, default='', help='optional reload model path')
+parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for') # 120
+parser.add_argument('--model', type=str, default='./log/pretrain_usage/network.pth', help='optional reload model path')
 parser.add_argument('--num_points', type=int, default=2500, help='number of points') # default : 2500
 parser.add_argument('--nb_primitives', type=int, default=1, help='number of primitives in the atlas')
 parser.add_argument('--super_points', type=int, default=2500,
@@ -159,9 +159,7 @@ for epoch in range(opt.nepoch):
 
         dist1, dist2, idx1, idx2 = distChamfer(points.transpose(2, 1).contiguous(), pointsRec)  # loss function
 
-        print(idx1)
-        print(idx2)
-
+        '''
         idx1_ln = idx1.long().unsqueeze(1).cpu().numpy()
         idx2_ln = idx2.long().unsqueeze(1).cpu().numpy()
 
@@ -169,14 +167,11 @@ for epoch in range(opt.nepoch):
         edge_len_pointsRec = pr[:, idx1_ln, :] - pr[:, idx2_ln, :]
         edge_len_points = torch.Tensor(edge_len_points).cuda()
         edge_len_pointsRec = torch.Tensor(edge_len_pointsRec).cuda()
-
-        # print(pointsRec.shape)
-        # print(points.shape)
-
-        uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze(), points.transpose(2, 1).contiguous().squeeze())
+        '''
 
         #  + 0.005 * L1_loss(edge_len_points, edge_len_pointsRec)
-        loss_net = (((torch.mean(dist1)) + (torch.mean(dist2))) + 0.0025 * L1_loss(edge_len_points, edge_len_pointsRec))
+        # loss_net = (((torch.mean(dist1)) + (torch.mean(dist2))) + 0.0025 * L1_loss(edge_len_points, edge_len_pointsRec))
+        loss_net = (torch.mean(dist1)) + (torch.mean(dist2))
         loss_net.backward()
         train_loss.update(loss_net.item())
         optimizer.step()  # gradient update
@@ -217,12 +212,6 @@ for epoch in range(opt.nepoch):
             img = img.unsqueeze(dim=0)
             img = img.float()
 
-            '''
-            vol_noize = torch.randn([1, 1, 256, 256, 256])
-            vol_noize = vol_noize.cuda()
-            img = 0.95 * img + 0.05 * vol_noize
-            '''
-
             points = points.transpose(2, 1).contiguous()
             points = points.cuda()
             # SUPER_RESOLUTION
@@ -243,6 +232,7 @@ for epoch in range(opt.nepoch):
 
             dist1, dist2, idx1, idx2 = distChamfer(points.transpose(2, 1).contiguous(), pointsRec)
 
+            '''
             idx1_ln = idx1.long().unsqueeze(1).cpu().numpy()
             idx2_ln = idx2.long().unsqueeze(1).cpu().numpy()
 
@@ -252,8 +242,10 @@ for epoch in range(opt.nepoch):
             edge_len_pointsRec = torch.Tensor(edge_len_pointsRec).cuda()
 
             uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze(), points.transpose(2, 1).contiguous().squeeze())
+            '''
 
-            loss_net = (((torch.mean(dist1)) + (torch.mean(dist2))) + 0.0025 * L1_loss(edge_len_points, edge_len_pointsRec))
+            # loss_net = (((torch.mean(dist1)) + (torch.mean(dist2))) + 0.0025 * L1_loss(edge_len_points, edge_len_pointsRec))
+            loss_net = (torch.mean(dist1)) + (torch.mean(dist2))
             val_loss.update(loss_net.item())
             dataset_test.perCatValueMeter[cat[0]].update(loss_net.item())
             if i % 200 == 0:

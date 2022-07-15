@@ -21,20 +21,20 @@ import meshio_custom
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=12)
-parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for') # 120
+parser.add_argument('--nepoch', type=int, default=120, help='number of epochs to train for') # 120
 parser.add_argument('--epoch_decay', type=int, default=300, help='epoch to decay lr')
 parser.add_argument('--epoch_decay2', type=int, default=400, help='epoch to decay lr for the second time')
 parser.add_argument('--model', type=str, default='./log/SVR_subnet1_usage/network.pth', help='model path from the pretrained model')
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud') # 10000
 parser.add_argument('--num_vertices', type=int, default=2562, help='number of vertices of the initial sphere')
 parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation') # 2500
-parser.add_argument('--env', type=str, default="SVR_subnet1_3", help='visdom env')
+parser.add_argument('--env', type=str, default="SVR_subnet1_1", help='visdom env')
 parser.add_argument('--lr', type=float, default=1e-5, help='initial learning rate')
 parser.add_argument('--tau', type=float, default=0.1, help='threshold to prune the faces')
 parser.add_argument('--lambda_edge', type=float, default=1e-5, help='weight of edge loss') # 0.05
-parser.add_argument('--lambda_smooth', type=float, default=5e-9, help='weight of smooth loss')
+parser.add_argument('--lambda_smooth', type=float, default=5e-7, help='weight of smooth loss')
 parser.add_argument('--lambda_normal', type=float, default=1e-3, help='weight of normal loss')
-parser.add_argument('--lambda_uniform_glob', type=float, default=1e-4, help='weight of global uniform loss')
+parser.add_argument('--lambda_uniform', type=float, default=1e-6, help='weight of uniform loss')
 parser.add_argument('--pool', type=str, default='max', help='max or mean or sum')
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
@@ -165,16 +165,19 @@ for epoch in range(opt.nepoch):
         img = img.unsqueeze(dim=0)
         img = img.float()
 
+        choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
+        points_choice = points[:, choice, :].contiguous()
+        normals_choice = normals[:, choice, :].contiguous()
+
         points = points.cuda()
         normals = normals.cuda()
+        points_choice = points_choice.cuda()
+        normals_choice = normals_choice.cuda()
         faces_gt = torch.squeeze(faces_gt)
         faces_gt_cuda = faces_gt.cuda()
         edge_cuda_gt = get_edges(faces_gt.numpy())
         points = points.float()
-        choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
-        points_choice = points[:, choice, :].contiguous()
         points_choice = points_choice.float()
-        normals_choice = normals[:, choice, :].contiguous()
         normals_choice = normals_choice.float()
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                  vertices_sphere.size(2)).contiguous())
@@ -210,10 +213,13 @@ for epoch in range(opt.nepoch):
         # normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
         normal_loss = get_normal_loss_mdf(normals_gen, normals_choice, idx2)
 
-        uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+        uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(),
+                                                                                 points_orig.squeeze().cpu().data.numpy())
+        uniform_loss_local = get_uniform_loss_local(b_v_list_gen.squeeze().cpu().data.numpy(), b_v_list_gt.squeeze().cpu().data.numpy())
 
-        loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform_glob * uniform_loss_global
+        loss_net = CD_loss + l2_loss  + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
         # loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_smooth * smoothness_loss
+        # loss_net = CD_loss * edge_loss * normal_loss * uniform_loss_global
 
         loss_net.backward()
         train_CD_loss.update(CD_loss.item())
@@ -239,7 +245,7 @@ for epoch in range(opt.nepoch):
                         ),
                         )
         print('[%d: %d/%d] train_cd_loss:  %f , l2_loss: %f, edge_loss: %f, smoothness_loss: %f, normal_loss: %f uniform_loss_global: %f, loss_net: %f' %
-              (epoch, i, len_dataset / opt.batchSize, CD_loss.item(),l2_loss.item(), edge_loss.item(), smoothness_loss.item(), normal_loss.item(), uniform_loss_global, loss_net.item()))
+              (epoch, i, len_dataset / opt.batchSize, CD_loss.item(),l2_loss.item(), edge_loss.item(), smoothness_loss.item(), normal_loss.item(), uniform_loss_global * uniform_loss_local, loss_net.item()))
 
     train_CD_curve.append(train_CD_loss.avg)
     train_CDs_curve.append(train_CDs_loss.avg)
@@ -301,10 +307,12 @@ for epoch in range(opt.nepoch):
             # normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
             normal_loss = get_normal_loss_mdf(normals_gen, normals, idx2)
 
-            uniform_loss_global = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+            uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+            uniform_loss_local = get_uniform_loss_local(b_v_list_gen.squeeze().cpu().data.numpy(), b_v_list_gt.squeeze().cpu().data.numpy())
 
-            loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform_glob * uniform_loss_global
+            loss_net = CD_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
             # loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_smooth * smoothness_loss
+            # loss_net = CD_loss * edge_loss * normal_loss * uniform_loss_global
 
             val_CD_loss.update(CD_loss.item())
             dataset_test.perCatValueMeter[cat[0]].update(CDs_loss.item())
@@ -329,7 +337,7 @@ for epoch in range(opt.nepoch):
                             )
 
             print('[%d: %d/%d] val_cd_loss:  %f , l2_loss: %f, edge_loss: %f, smoothness_loss: %f, normal_loss: %f, uniform_loss_global: %f, loss_net: %f'
-                  % (epoch, i, len(dataset_test) / opt.batchSize, CD_loss.item(), l2_loss.item(), edge_loss.item(), smoothness_loss.item(), normal_loss.item(), uniform_loss_global, loss_net.item()))
+                  % (epoch, i, len(dataset_test) / opt.batchSize, CD_loss.item(), l2_loss.item(), edge_loss.item(), smoothness_loss.item(), normal_loss.item(), uniform_loss_global * uniform_loss_local, loss_net.item()))
 
         val_CD_curve.append(val_CD_loss.avg)
         val_l2_curve.append(val_l2_loss.avg)

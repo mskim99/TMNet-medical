@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+import utils
 
 def normalize(input, p=2, dim=1, eps=1e-12):
     input = input.float()
@@ -260,7 +261,11 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
     b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
     b_v_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
                            dtype=object)
+    b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
+                           dtype=object)
     b_v_list_gen = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
+                            dtype=object)
+    b_f_list_gen = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
                             dtype=object)
     loss_part = np.zeros([(b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)])
 
@@ -279,20 +284,24 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
 
                 # Comparison between vertices of ground truth mesh
                 b_v_list_gt[b_v_idx] = []
+                b_f_list_gt[b_v_idx] = []
                 for e_i in range(0, vertices_gt.shape[0]):
                     if b_range[0][x_i] <= vertices_gt[e_i][0] < b_range[0][x_i + 1] and \
                             b_range[1][y_i] <= vertices_gt[e_i][1] < b_range[0][y_i + 1] and \
                             b_range[2][z_i] <= vertices_gt[e_i][2] < b_range[2][z_i + 1]:
                         b_v_list_gt[b_v_idx].append(vertices_gt[e_i][:])
+                        b_f_list_gt[b_v_idx].append(e_i)
                 b_v_list_gt[b_v_idx] = np.array(b_v_list_gt[b_v_idx])
 
                 # Comparison between vertices of generated mesh
                 b_v_list_gen[b_v_idx] = []
+                b_f_list_gen[b_v_idx] = []
                 for e_i in range(0, vertices_gen.shape[0]):
                     if b_range[0][x_i] <= vertices_gen[e_i][0] < b_range[0][x_i + 1] and \
                             b_range[1][y_i] <= vertices_gen[e_i][1] < b_range[0][y_i + 1] and \
                             b_range[2][z_i] <= vertices_gen[e_i][2] < b_range[2][z_i + 1]:
                         b_v_list_gen[b_v_idx].append(vertices_gen[e_i][:])
+                        b_f_list_gen[b_v_idx].append(e_i)
                 b_v_list_gen[b_v_idx] = np.array(b_v_list_gen[b_v_idx])
 
                 b_v_idx = b_v_idx + 1
@@ -340,11 +349,19 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
     print(gu_loss)
     '''
 
-    return gu_loss# , b_v_list_gen, b_v_list_gt
-'''
-def get_uniform_loss_local(b_v_list_gen, b_v_list_gt):
+    return gu_loss, b_v_list_gen, b_f_list_gen
 
-    
 
-    return 0.0
-    '''
+def get_uniform_loss_local(b_v_list_gen, b_f_list_gen):
+
+    num_vertices = b_v_list_gen.shape[0]
+    b_v_list_gen_edges = utils.get_edges(b_f_list_gen)
+    b_e_gen = b_v_list_gen[b_v_list_gen_edges[:, 1], :] - b_v_list_gen_edges[b_v_list_gen_edges[:, 0], :]
+    edges_length = torch.sqrt(b_e_gen[:, 0] * b_e_gen[:, 0] + b_e_gen[:, 1] * b_e_gen[:, 1] + b_e_gen[:, 2] * b_e_gen[:, 2])
+
+    exp_dist = np.sqrt(2 * 3.141592 * 0.25 / float(num_vertices) * 1.73205) # div 222, root 3
+
+    lu_loss = (edges_length - exp_dist) * (edges_length - exp_dist) / exp_dist
+    lu_loss = torch.sum(lu_loss)
+
+    return lu_loss
