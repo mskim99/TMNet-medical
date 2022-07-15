@@ -29,7 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=12)
 parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for') # 120
-parser.add_argument('--model', type=str, default='./log/pretrain_usage/network.pth', help='optional reload model path')
+parser.add_argument('--model', type=str, default='', help='optional reload model path')
 parser.add_argument('--num_points', type=int, default=2500, help='number of points') # default : 2500
 parser.add_argument('--nb_primitives', type=int, default=1, help='number of primitives in the atlas')
 parser.add_argument('--super_points', type=int, default=2500,
@@ -44,7 +44,7 @@ sys.path.append("./extension/")
 import dist_chamfer as ext
 distChamfer = ext.chamferDist()
 
-vis = visdom.Visdom(port=8886, env=opt.env)
+vis = visdom.Visdom(port=8887, env=opt.env)
 now = datetime.datetime.now()
 save_path = opt.env
 dir_name = os.path.join('./log', save_path)
@@ -57,7 +57,7 @@ random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 
 dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=False, train=True, class_choice='lumbar_vertebra_05')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,

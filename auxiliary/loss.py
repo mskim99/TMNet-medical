@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import math
 
 import utils
 
@@ -292,6 +293,7 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
                         b_v_list_gt[b_v_idx].append(vertices_gt[e_i][:])
                         b_f_list_gt[b_v_idx].append(e_i)
                 b_v_list_gt[b_v_idx] = np.array(b_v_list_gt[b_v_idx])
+                b_f_list_gt[b_v_idx] = np.array(b_f_list_gt[b_v_idx])
 
                 # Comparison between vertices of generated mesh
                 b_v_list_gen[b_v_idx] = []
@@ -303,6 +305,7 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
                         b_v_list_gen[b_v_idx].append(vertices_gen[e_i][:])
                         b_f_list_gen[b_v_idx].append(e_i)
                 b_v_list_gen[b_v_idx] = np.array(b_v_list_gen[b_v_idx])
+                b_f_list_gen[b_v_idx] = np.array(b_f_list_gen[b_v_idx])
 
                 b_v_idx = b_v_idx + 1
 
@@ -352,16 +355,19 @@ def get_uniform_loss_global(vertices_gen, vertices_gt):
     return gu_loss, b_v_list_gen, b_f_list_gen
 
 
-def get_uniform_loss_local(b_v_list_gen, b_f_list_gen):
+def get_uniform_loss_local(vertices_gen, b_v_list_gen, b_f_list_gen):
 
-    num_vertices = b_v_list_gen.shape[0]
-    b_v_list_gen_edges = utils.get_edges(b_f_list_gen)
-    b_e_gen = b_v_list_gen[b_v_list_gen_edges[:, 1], :] - b_v_list_gen_edges[b_v_list_gen_edges[:, 0], :]
-    edges_length = torch.sqrt(b_e_gen[:, 0] * b_e_gen[:, 0] + b_e_gen[:, 1] * b_e_gen[:, 1] + b_e_gen[:, 2] * b_e_gen[:, 2])
+    lu_loss_total = 0.0
+    for i in range (0, len(b_f_list_gen)):
+        num_vertices = b_v_list_gen[i].shape[0]
+        for j in range(0, math.ceil(b_f_list_gen[i].shape[0] / 2) - 1):
+            b_f_list_gen_part = b_f_list_gen[i]
+            b_e_gen = vertices_gen[b_f_list_gen_part[2 * j]] - vertices_gen[b_f_list_gen_part[2 * j + 1]]
+            edges_length = np.sqrt(b_e_gen[0] * b_e_gen[0] + b_e_gen[1] * b_e_gen[1] + b_e_gen[2] * b_e_gen[2])
 
-    exp_dist = np.sqrt(2 * 3.141592 * 0.25 / float(num_vertices) * 1.73205) # div 222, root 3
+            exp_dist = np.sqrt(2 * 3.141592 * 0.25 / float(num_vertices) * 1.73205) # div 222, root 3
 
-    lu_loss = (edges_length - exp_dist) * (edges_length - exp_dist) / exp_dist
-    lu_loss = torch.sum(lu_loss)
+            lu_loss = (edges_length - exp_dist) * (edges_length - exp_dist) / exp_dist
+            lu_loss_total = lu_loss_total + lu_loss
 
     return lu_loss

@@ -201,6 +201,44 @@ class DeformNet(nn.Module):
         return x
 
 
+class DeformNet_split(nn.Module):
+    def __init__(self, bottleneck_size=1024):
+        self.bottleneck_size = bottleneck_size
+        super(DeformNet, self).__init__()
+
+        self.conv1 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size, 1)
+        self.conv2 = torch.nn.Conv1d(self.bottleneck_size, (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
+        self.conv3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), self.bottleneck_size // 2,
+                                     1)
+        self.conv4 = torch.nn.Conv1d(self.bottleneck_size // 2, self.bottleneck_size // 4, 1)
+        self.conv5 = torch.nn.Conv1d(self.bottleneck_size // 4, 3, 1)
+
+        self.bn1 = torch.nn.BatchNorm1d(self.bottleneck_size)
+        self.bn2 = torch.nn.BatchNorm1d(self.bottleneck_size // 2 + self.bottleneck_size // 4)
+        self.bn3 = torch.nn.BatchNorm1d(self.bottleneck_size // 2)
+        self.bn4 = torch.nn.BatchNorm1d(self.bottleneck_size // 4)
+
+        self.th = nn.Tanh()
+
+        self.maxpool = torch.nn.MaxPool3d(kernel_size=3, stride=2, padding=1)
+
+    def forward(self, x):
+
+        # Original Code
+        x = F.relu(self.bn1(self.conv1(x)))
+        print(x.shape)
+        x = F.relu(self.bn2(self.conv2(x)))
+        print(x.shape)
+        x = F.relu(self.bn3(self.conv3(x)))
+        print(x.shape)
+        x = F.relu(self.bn4(self.conv4(x)))
+        print(x.shape)
+        x = self.th(self.conv5(x))
+        print(x.shape)
+
+        return x
+
+
 class DeformNet_Res(nn.Module):
     def __init__(self, bottleneck_size=1024):
         self.bottleneck_size = bottleneck_size
@@ -412,6 +450,80 @@ class SVR_TMNet(nn.Module):
         return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
 
 
+class SVR_TMNet(nn.Module):
+    def __init__(self,  bottleneck_size = 1024):
+        super(SVR_TMNet, self).__init__()
+        self.bottleneck_size = bottleneck_size
+        self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
+        self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
+        self.decoder2 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
+        self.estimate = Estimator(bottleneck_size=3 + self.bottleneck_size)
+        self.estimate2 = Estimator(bottleneck_size=3+self.bottleneck_size)
+        self.refine = Refiner(bottleneck_size=3 + self.bottleneck_size)
+
+    def forward(self,x,points,vector1=0,vector2=0,mode='deform1'):
+        x = x[:,:3,:,:].contiguous()
+        x, _ = self.encoder(x)
+        if points.size(1) != 3:
+            points = points.transpose(2,1)
+        y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
+        y = torch.cat((points, y), 1).contiguous()
+        if mode == 'deform1':
+            outs = self.decoder[0](y, 0)
+        elif mode == 'deform2':
+            outs = self.decoder2[0](y, 0)
+            outs = outs + points
+        elif mode == 'estimate':
+            outs = self.estimate(y)
+        elif mode == 'estimate2':
+            outs = self.estimate2(y)
+        elif mode == 'refine':
+            outs = self.refine(y)
+            outs1 = outs[:, 0].unsqueeze(1)
+            outs2 = outs[:, 1].unsqueeze(1)
+            outs = outs1 * vector1 + outs2 * vector2 + points
+        else:
+            outs = None
+        return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+
+
+class SVR_TMNet_Split(nn.Module):
+    def __init__(self,  bottleneck_size = 1024):
+        super(SVR_TMNet, self).__init__()
+        self.bottleneck_size = bottleneck_size
+        self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
+        self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
+        self.decoder2 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
+        self.estimate = Estimator(bottleneck_size=3 + self.bottleneck_size)
+        self.estimate2 = Estimator(bottleneck_size=3+self.bottleneck_size)
+        self.refine = Refiner(bottleneck_size=3 + self.bottleneck_size)
+
+    def forward(self,x,points_parts,vector1=0,vector2=0,mode='deform1'):
+        x = x[:,:3,:,:].contiguous()
+        x, _ = self.encoder(x)
+        if points_parts.size(1) != 3:
+            points = points_parts.transpose(2,1)
+        y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
+        y = torch.cat((points, y), 1).contiguous()
+        if mode == 'deform1':
+            outs = self.decoder[0](y, 0)
+        elif mode == 'deform2':
+            outs = self.decoder2[0](y, 0)
+            outs = outs + points
+        elif mode == 'estimate':
+            outs = self.estimate(y)
+        elif mode == 'estimate2':
+            outs = self.estimate2(y)
+        elif mode == 'refine':
+            outs = self.refine(y)
+            outs1 = outs[:, 0].unsqueeze(1)
+            outs2 = outs[:, 1].unsqueeze(1)
+            outs = outs1 * vector1 + outs2 * vector2 + points
+        else:
+            outs = None
+        return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+
+
 class Pretrain(nn.Module):
     def __init__(self,  bottleneck_size = 1024,num_points=2500):
         super(Pretrain, self).__init__()
@@ -423,7 +535,7 @@ class Pretrain(nn.Module):
         nn.BatchNorm1d(self.bottleneck_size),
         nn.ReLU()
         )
-        self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
+        self.encoder = resnet_3D.resnet34_3D(num_classes=self.bottleneck_size)
         self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
 
     def forward(self, x, mode='point'):

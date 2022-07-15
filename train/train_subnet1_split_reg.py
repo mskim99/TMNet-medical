@@ -45,7 +45,7 @@ import dist_chamfer as ext
 distChamfer = ext.chamferDist()
 
 server = 'http://localhost/'
-vis = visdom.Visdom(server=server, port=8887, env=opt.env, use_incoming_socket=False)
+vis = visdom.Visdom(server=server, port=8886, env=opt.env, use_incoming_socket=False)
 now = datetime.datetime.now()
 save_path = opt.env
 dir_name = os.path.join('./log', save_path)
@@ -147,15 +147,6 @@ for epoch in range(opt.nepoch):
             {'params': network.decoder.parameters()}
         ], lr=lrate / 100.0, weight_decay=0.1)
 
-    '''
-    if epoch > 40 and epoch <= 80:
-        opt.lambda_uniform_glob = 5e-4
-    if epoch > 80 and epoch <= 120:
-        opt.lambda_uniform_glob = 1e-3
-    if epoch >= 120:
-        opt.lambda_uniform_glob = 5e-3
-        '''
-
     torch.manual_seed(0)
 
     for i, data in enumerate(dataloader, 0):
@@ -181,6 +172,28 @@ for epoch in range(opt.nepoch):
         normals_choice = normals_choice.float()
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                  vertices_sphere.size(2)).contiguous())
+
+        '''
+        # Split Regions
+        b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
+        b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
+                               dtype=object)
+        
+        b_v_idx = 0
+        for x_i in range(0, (b_range[0].shape[0] - 1)):
+            for y_i in range(0, (b_range[1].shape[0] - 1)):
+                for z_i in range(0, (b_range[2].shape[0] - 1)):
+
+                    # Comparison between vertices of ground truth mesh
+                    b_f_list_gt[b_v_idx] = []
+                    for e_i in range(0, points.shape[0]):
+                        if b_range[0][x_i] <= points[e_i][0] < b_range[0][x_i + 1] and \
+                                b_range[1][y_i] <= points[e_i][1] < b_range[0][y_i + 1] and \
+                                b_range[2][z_i] <= points[e_i][2] < b_range[2][z_i + 1]:
+                            b_f_list_gt[b_v_idx].append(e_i)
+                    b_f_list_gt[b_v_idx] = np.array(b_f_list_gt[b_v_idx])
+                    '''
+
         pointsRec = network(img, vertices_input, mode='deform1')  # vertices_sphere 3*2562
 
         dist1, dist2, _, idx2 = distChamfer(points_choice, pointsRec)
@@ -214,11 +227,9 @@ for epoch in range(opt.nepoch):
         normal_loss = get_normal_loss_mdf(normals_gen, normals_choice, idx2)
 
         uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
-        uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(),b_v_list_gen, b_v_list_gt)
+        uniform_loss_local = get_uniform_loss_local(b_v_list_gen, b_v_list_gt)
 
         loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
-        # loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_smooth * smoothness_loss
-        # loss_net = CD_loss * edge_loss * normal_loss * uniform_loss_global
 
         loss_net.backward()
         train_CD_loss.update(CD_loss.item())
@@ -228,7 +239,6 @@ for epoch in range(opt.nepoch):
 
         # VIZUALIZE
         if i % 50 <= 0:
-            # vis.image(img[0, :, 112, :].data.cpu().contiguous(), win='INPUT IMAGE TRAIN', opts=dict(title="INPUT IMAGE TRAIN"))
             vis.scatter(X=points[0].data.cpu(),
                         win='TRAIN_INPUT',
                         opts=dict(
@@ -275,6 +285,7 @@ for epoch in range(opt.nepoch):
             points_choice = points_choice.float()
             vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                      vertices_sphere.size(2)).contiguous())
+
             pointsRec = network(img, vertices_input, mode='deform1')  # points_sphere 3*2562
 
             dist1, dist2, idx1, idx2 = distChamfer(points_choice, pointsRec)
@@ -297,7 +308,6 @@ for epoch in range(opt.nepoch):
             pointsRec = torch.unsqueeze(pointsRec, 0)
 
             CD_loss = torch.mean(dist1) + torch.mean(dist2)
-            # edge_loss = get_edge_loss_stage1(pointsRec, edge_cuda.detach())
             edge_loss = get_edge_loss_stage1_whmr(pointsRec, points_orig, edge_cuda, edge_cuda_gt)
             smoothness_loss = get_smoothness_loss_stage1(pointsRec, parameters)
             l2_loss = calculate_l2_loss(error, error_GT.detach())
@@ -307,11 +317,9 @@ for epoch in range(opt.nepoch):
             normal_loss = get_normal_loss_mdf(normals_gen, normals, idx2)
 
             uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
-            uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(),b_v_list_gen, b_v_list_gt)
+            uniform_loss_local = get_uniform_loss_local(b_v_list_gen.squeeze().cpu().data.numpy(), b_v_list_gt.squeeze().cpu().data.numpy())
 
             loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
-            # loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_smooth * smoothness_loss
-            # loss_net = CD_loss * edge_loss * normal_loss * uniform_loss_global
 
             val_CD_loss.update(CD_loss.item())
             dataset_test.perCatValueMeter[cat[0]].update(CDs_loss.item())
@@ -319,7 +327,6 @@ for epoch in range(opt.nepoch):
             val_CDs_loss.update(CDs_loss.item())
 
             if i % 25 == 0:
-                # vis.image(img[0, :, 112, :].data.cpu().contiguous(), win='INPUT IMAGE VAL', opts=dict(title="INPUT IMAGE TRAIN"))
                 vis.scatter(X=points[0].data.cpu(),
                             win='VAL_INPUT',
                             opts=dict(
