@@ -24,7 +24,7 @@ parser.add_argument('--workers', type=int, help='number of data loading workers'
 parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for') # 120
 parser.add_argument('--epoch_decay', type=int, default=300, help='epoch to decay lr')
 parser.add_argument('--epoch_decay2', type=int, default=400, help='epoch to decay lr for the second time')
-parser.add_argument('--model', type=str, default='./log/SVR_subnet1_usage/network.pth', help='model path from the pretrained model')
+parser.add_argument('--model', type=str, default='', help='model path from the pretrained model')
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud') # 10000
 parser.add_argument('--num_vertices', type=int, default=2562, help='number of vertices of the initial sphere')
 parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation') # 2500
@@ -45,7 +45,7 @@ import dist_chamfer as ext
 distChamfer = ext.chamferDist()
 
 server = 'http://localhost/'
-vis = visdom.Visdom(server=server, port=8886, env=opt.env, use_incoming_socket=False)
+vis = visdom.Visdom(server=server, port=8887, env=opt.env, use_incoming_socket=False)
 now = datetime.datetime.now()
 save_path = opt.env
 dir_name = os.path.join('./log', save_path)
@@ -82,12 +82,14 @@ faces_cuda = torch.from_numpy(faces.astype(int)).type(torch.cuda.LongTensor)
 vertices_sphere = np.array(mesh['v'])
 # vertices_sphere = mesh['vertices']
 
+vertices_sphere = (vertices_sphere + 1.) / 2. # normalize
+
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0, 1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 edge_cuda = get_edges(faces)
 parameters = smoothness_loss_parameters(faces)
 
-network = SVR_TMNet()
+network = SVR_TMNet_Split()
 network.apply(weights_init)
 
 network.cuda()
@@ -170,33 +172,56 @@ for epoch in range(opt.nepoch):
         points = points.float()
         points_choice = points_choice.float()
         normals_choice = normals_choice.float()
-        vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
-                                                 vertices_sphere.size(2)).contiguous())
+        vertices_input = (vertices_sphere.reshape(img.size(0), vertices_sphere.size(2),
+                                                 vertices_sphere.size(1)).contiguous())
 
-        '''
+
         # Split Regions
         b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
         b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
                                dtype=object)
-        
-        b_v_idx = 0
+
+        # Split Regions
+        b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
+        b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        points_choice_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        b_f_list_gen = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        vertices_input_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+
+        b_v_i = 0
         for x_i in range(0, (b_range[0].shape[0] - 1)):
             for y_i in range(0, (b_range[1].shape[0] - 1)):
                 for z_i in range(0, (b_range[2].shape[0] - 1)):
 
                     # Comparison between vertices of ground truth mesh
-                    b_f_list_gt[b_v_idx] = []
-                    for e_i in range(0, points.shape[0]):
-                        if b_range[0][x_i] <= points[e_i][0] < b_range[0][x_i + 1] and \
-                                b_range[1][y_i] <= points[e_i][1] < b_range[0][y_i + 1] and \
-                                b_range[2][z_i] <= points[e_i][2] < b_range[2][z_i + 1]:
-                            b_f_list_gt[b_v_idx].append(e_i)
-                    b_f_list_gt[b_v_idx] = np.array(b_f_list_gt[b_v_idx])
-                    '''
+                    b_f_list_gt[b_v_i] = []
+                    points_choice_parts[b_v_i] = []
+                    for e_i in range(0, points_choice.shape[1]):
+                        if b_range[0][x_i] <= points_choice[0, e_i, 0] < b_range[0][x_i + 1] and \
+                                b_range[1][y_i] <= points_choice[0, e_i, 1] < b_range[1][y_i + 1] and \
+                                b_range[2][z_i] <= points_choice[0, e_i, 2] < b_range[2][z_i + 1]:
+                            b_f_list_gt[b_v_i].append(e_i)
+                            points_choice_parts[b_v_i].append(points_choice[0, e_i, :])
+                    b_f_list_gt[b_v_i] = np.array(b_f_list_gt[b_v_i])
+                    points_choice_parts[b_v_i] = np.array(points_choice_parts[b_v_i])
 
-        pointsRec = network(img, vertices_input, mode='deform1')  # vertices_sphere 3*2562
+                    # Comparison between vertices of generated mesh
+                    b_f_list_gen[b_v_i] = []
+                    vertices_input_parts[b_v_i] = []
+                    for e_i in range(0, vertices_input.shape[1]):
+                        if b_range[0][x_i] <= vertices_input[0, e_i, 0] < b_range[0][x_i + 1] and \
+                                b_range[1][y_i] <= vertices_input[0, e_i, 1] < b_range[0][y_i + 1] and \
+                                b_range[2][z_i] <= vertices_input[0, e_i, 2] < b_range[2][z_i + 1]:
+                            b_f_list_gen[b_v_i].append(e_i)
+                            vertices_input_parts[b_v_i].append(vertices_input[0, e_i, :])
+                    b_f_list_gen[b_v_i] = np.array(b_f_list_gen[b_v_i])
+                    vertices_input_parts[b_v_i] = np.array(vertices_input_parts[b_v_i])
 
-        dist1, dist2, _, idx2 = distChamfer(points_choice, pointsRec)
+                    b_v_i = b_v_i + 1
+
+        pointsRec = network(img, vertices_input_parts, mode='deform1')  # vertices_sphere 3*2562
+
+        dist1, dist2, _, idx2 = distChamfer(points_choice_parts, pointsRec)
 
         pointsRec_samples, _ = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
         dist1_samples, dist2_samples, _, _ = distChamfer(points, pointsRec_samples.detach())
@@ -283,8 +308,8 @@ for epoch in range(opt.nepoch):
             choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
             points_choice = points[:, choice, :].contiguous()
             points_choice = points_choice.float()
-            vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
-                                                     vertices_sphere.size(2)).contiguous())
+            vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(2),
+                                                     vertices_sphere.size(1)).contiguous())
 
             pointsRec = network(img, vertices_input, mode='deform1')  # points_sphere 3*2562
 

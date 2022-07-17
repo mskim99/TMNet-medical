@@ -24,11 +24,11 @@ parser.add_argument('--workers', type=int, help='number of data loading workers'
 parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for') # 120
 parser.add_argument('--epoch_decay', type=int, default=300, help='epoch to decay lr')
 parser.add_argument('--epoch_decay2', type=int, default=400, help='epoch to decay lr for the second time')
-parser.add_argument('--model', type=str, default='./log/SVR_subnet1_usage/network.pth', help='model path from the pretrained model')
+parser.add_argument('--model', type=str, default='', help='model path from the pretrained model')
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud') # 10000
 parser.add_argument('--num_vertices', type=int, default=2562, help='number of vertices of the initial sphere')
 parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation') # 2500
-parser.add_argument('--env', type=str, default="SVR_subnet1_1", help='visdom env')
+parser.add_argument('--env', type=str, default="SVR_subnet1_2", help='visdom env')
 parser.add_argument('--lr', type=float, default=1e-5, help='initial learning rate')
 parser.add_argument('--tau', type=float, default=0.1, help='threshold to prune the faces')
 parser.add_argument('--lambda_edge', type=float, default=1e-5, help='weight of edge loss') # 0.05
@@ -58,7 +58,7 @@ random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 
 dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=True, train=True, class_choice='lumbar_vertebra_05')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
@@ -181,6 +181,8 @@ for epoch in range(opt.nepoch):
         normals_choice = normals_choice.float()
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                  vertices_sphere.size(2)).contiguous())
+
+
         pointsRec = network(img, vertices_input, mode='deform1')  # vertices_sphere 3*2562
 
         dist1, dist2, _, idx2 = distChamfer(points_choice, pointsRec)
@@ -216,7 +218,7 @@ for epoch in range(opt.nepoch):
         uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
         uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(),b_v_list_gen, b_v_list_gt)
 
-        loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
+        loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform * uniform_loss_global # * uniform_loss_local
         # loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_smooth * smoothness_loss
         # loss_net = CD_loss * edge_loss * normal_loss * uniform_loss_global
 
@@ -309,7 +311,7 @@ for epoch in range(opt.nepoch):
             uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
             uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(),b_v_list_gen, b_v_list_gt)
 
-            loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
+            loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_uniform * uniform_loss_global # * uniform_loss_local
             # loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss + opt.lambda_smooth * smoothness_loss
             # loss_net = CD_loss * edge_loss * normal_loss * uniform_loss_global
 

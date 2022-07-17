@@ -454,7 +454,7 @@ class SVR_TMNet(nn.Module):
     def __init__(self,  bottleneck_size = 1024):
         super(SVR_TMNet, self).__init__()
         self.bottleneck_size = bottleneck_size
-        self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
+        self.encoder = resnet_3D.resnet34_3D(num_classes=self.bottleneck_size)
         self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.decoder2 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.estimate = Estimator(bottleneck_size=3 + self.bottleneck_size)
@@ -489,7 +489,7 @@ class SVR_TMNet(nn.Module):
 
 class SVR_TMNet_Split(nn.Module):
     def __init__(self,  bottleneck_size = 1024):
-        super(SVR_TMNet, self).__init__()
+        super(SVR_TMNet_Split, self).__init__()
         self.bottleneck_size = bottleneck_size
         self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
         self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])

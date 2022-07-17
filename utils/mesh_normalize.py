@@ -5,7 +5,7 @@ import sklearn.preprocessing as sklp
 sys.path.append('./auxiliary/')
 import meshio_custom
 
-mesh = meshio_custom.read_obj('./f_034_vrt_24.obj')
+mesh = meshio_custom.read_obj('./f_043_vrt_24.obj')
 points_origin = mesh['vertices']
 faces_origin = mesh['faces']
 
@@ -23,4 +23,4 @@ normals_origin[faces_origin[:,2]] += normals_origin_value[:]
 normals_origin_len = np.sqrt(normals_origin[:,0]*normals_origin[:,0]+normals_origin[:,1]*normals_origin[:,1]+normals_origin[:,2]*normals_origin[:,2])
 normals_origin = normals_origin / normals_origin_len.reshape(-1, 1)
 
-mesh = meshio_custom.write_obj('./f_034_vrt_24_norm2.obj', points_origin, faces_origin, None, normals_origin)
+mesh = meshio_custom.write_obj('./f_043_vrt_24_norm2.obj', points_origin, faces_origin, None, normals_origin)

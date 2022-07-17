@@ -159,7 +159,7 @@ for epoch in range(opt.nepoch):
         b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
         b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
                                dtype=object)
-        pointsRec_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
+        points_choice_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
                                dtype=object)
 
         b_v_idx = 0
@@ -169,15 +169,15 @@ for epoch in range(opt.nepoch):
 
                     # Comparison between vertices of ground truth mesh
                     b_f_list_gt[b_v_idx] = []
-                    for e_i in range(0, points.shape[0]):
-                        if b_range[0][x_i] <= points[e_i][0] < b_range[0][x_i + 1] and \
-                                b_range[1][y_i] <= points[e_i][1] < b_range[0][y_i + 1] and \
-                                b_range[2][z_i] <= points[e_i][2] < b_range[2][z_i + 1]:
+                    for e_i in range(0, points_choice.shape[0]):
+                        if b_range[0][x_i] <= points_choice[e_i][0] < b_range[0][x_i + 1] and \
+                                b_range[1][y_i] <= points_choice[e_i][1] < b_range[0][y_i + 1] and \
+                                b_range[2][z_i] <= points_choice[e_i][2] < b_range[2][z_i + 1]:
                             b_f_list_gt[b_v_idx].append(e_i)
                     b_f_list_gt[b_v_idx] = np.array(b_f_list_gt[b_v_idx])
-                    pointsRec_parts[b_v_idx] = np.array(pointsRec[b_f_list_gt[b_v_idx]])
+                    points_choice_parts[b_v_idx] = np.array(pointsRec[b_f_list_gt[b_v_idx]])
 
-        pointsRec2 = network(img, pointsRec_parts, mode='deform2')
+        pointsRec2 = network(img, points_choice_parts, mode='deform2')
         _, _, _, idx2 = distChamfer(points, pointsRec2)
         _, _, _, idx2_choice = distChamfer(points_choice, pointsRec2)
 

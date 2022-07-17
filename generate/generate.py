@@ -26,7 +26,7 @@ parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
 parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
 parser.add_argument('--num_vertices', type=int, default=2562) # 2562
-parser.add_argument('--subnet',type=int,default=1)
+parser.add_argument('--subnet',type=int,default=2)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
