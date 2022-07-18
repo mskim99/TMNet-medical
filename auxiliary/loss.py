@@ -42,10 +42,10 @@ def get_edge_loss_stage1(vertices,edge):
 def get_edge_loss_stage1_whmr(vertices, vertices_gt, edge, edge_gt):
 
     el = vertices[:, edge[:, 1], :] - vertices[:, edge[:, 0], :]
-    edges_length = torch.sqrt(el[:, :, 0] * el[:, :, 0] + el[:, :, 1] * el[:, :, 1] + el[:, :, 2] * el[:, :, 2])
+    edges_length = torch.sqrt(el[:, :, 0] * el[:, :, 0] + el[:, :, 1] * el[:, :, 1] + el[:, :, 2] * el[:, :, 2] + 1e-9)
 
     elg = vertices_gt[:, edge_gt[:, 1], :] - vertices_gt[:, edge_gt[:, 0], :]
-    edge_length_gt_mean = torch.sqrt(elg[:, :, 0] * elg[:, :, 0] + elg[:, :, 1] * elg[:, :, 1] + elg[:, :, 2] * elg[:, :, 2])
+    edge_length_gt_mean = torch.sqrt(elg[:, :, 0] * elg[:, :, 0] + elg[:, :, 1] * elg[:, :, 1] + elg[:, :, 2] * elg[:, :, 2] + 1e-9)
     edge_length_gt_mean = torch.sum(edge_length_gt_mean) / float(edge_gt.size(0))
 
     edge_loss = torch.abs(edges_length - edge_length_gt_mean)
@@ -370,4 +370,4 @@ def get_uniform_loss_local(vertices_gen, b_v_list_gen, b_f_list_gen):
             lu_loss = (edges_length - exp_dist) * (edges_length - exp_dist) / exp_dist
             lu_loss_total = lu_loss_total + lu_loss
 
-    return lu_loss
+    return lu_loss_total

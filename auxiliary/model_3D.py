@@ -193,10 +193,15 @@ class DeformNet(nn.Module):
 
         # Original Code
         x = F.relu(self.bn1(self.conv1(x)))
+        # print(x.shape)
         x = F.relu(self.bn2(self.conv2(x)))
+        # print(x.shape)
         x = F.relu(self.bn3(self.conv3(x)))
+        # print(x.shape)
         x = F.relu(self.bn4(self.conv4(x)))
+        # print(x.shape)
         x = self.th(self.conv5(x))
+        # print(x.shape)
 
         return x
 
@@ -208,8 +213,7 @@ class DeformNet_split(nn.Module):
 
         self.conv1 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size, 1)
         self.conv2 = torch.nn.Conv1d(self.bottleneck_size, (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
-        self.conv3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), self.bottleneck_size // 2,
-                                     1)
+        self.conv3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), self.bottleneck_size // 2, 1)
         self.conv4 = torch.nn.Conv1d(self.bottleneck_size // 2, self.bottleneck_size // 4, 1)
         self.conv5 = torch.nn.Conv1d(self.bottleneck_size // 4, 3, 1)
 
@@ -222,7 +226,7 @@ class DeformNet_split(nn.Module):
 
         self.maxpool = torch.nn.MaxPool3d(kernel_size=3, stride=2, padding=1)
 
-    def forward(self, x):
+    def forward(self, x, points):
 
         # Original Code
         x = F.relu(self.bn1(self.conv1(x)))
@@ -491,27 +495,43 @@ class SVR_TMNet_Split(nn.Module):
     def __init__(self,  bottleneck_size = 1024):
         super(SVR_TMNet_Split, self).__init__()
         self.bottleneck_size = bottleneck_size
-        self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
-        self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
+        self.encoder = resnet_3D.resnet34_3D(num_classes=self.bottleneck_size)
+        self.decoder = nn.ModuleList([DeformNet(bottleneck_size=self.bottleneck_size)])
         self.decoder2 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.estimate = Estimator(bottleneck_size=3 + self.bottleneck_size)
         self.estimate2 = Estimator(bottleneck_size=3+self.bottleneck_size)
         self.refine = Refiner(bottleneck_size=3 + self.bottleneck_size)
 
-    def forward(self,x,points_parts,vector1=0,vector2=0,mode='deform1'):
+    def forward(self,x,points,vector1=0,vector2=0,mode='deform1'):
         x = x[:,:3,:,:].contiguous()
+
+        assert not torch.isnan(x).any()
+        assert not torch.isinf(x).any()
+
         x, _ = self.encoder(x)
+        '''
         if points_parts.size(1) != 3:
             points = points_parts.transpose(2,1)
+            
         y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
         y = torch.cat((points, y), 1).contiguous()
+        '''
+        outs = []
         if mode == 'deform1':
-            outs = self.decoder[0](y, 0)
+            for i in range(0, points.shape[0]):
+                y = x.unsqueeze(2).expand(x.size(0), x.size(1), points[i].shape[1]).contiguous()
+                res = self.decoder[0](y, points[i].shape[1])
+                outs.append(res.contiguous().transpose(2,1).contiguous())
         elif mode == 'deform2':
             outs = self.decoder2[0](y, 0)
             outs = outs + points
         elif mode == 'estimate':
+            if points.size(1) != 3:
+                points = points.transpose(2,1)
+            y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
+            y = torch.cat((points, y), 1).contiguous()
             outs = self.estimate(y)
+            outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
         elif mode == 'estimate2':
             outs = self.estimate2(y)
         elif mode == 'refine':
@@ -521,7 +541,8 @@ class SVR_TMNet_Split(nn.Module):
             outs = outs1 * vector1 + outs2 * vector2 + points
         else:
             outs = None
-        return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+        # return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+        return outs
 
 
 class Pretrain(nn.Module):
