@@ -32,7 +32,7 @@ parser.add_argument('--num_samples',type=int,default=5000, help='number of sampl
 parser.add_argument('--env', type=str, default="SVR_subnet1_2", help='visdom env')
 parser.add_argument('--lr', type=float, default=1e-5, help='initial learning rate')
 parser.add_argument('--tau', type=float, default=0.1, help='threshold to prune the faces')
-parser.add_argument('--lambda_edge', type=float, default=1e-7, help='weight of edge loss') # 0.05
+parser.add_argument('--lambda_edge', type=float, default=1e-5, help='weight of edge loss') # 0.05
 parser.add_argument('--lambda_smooth', type=float, default=5e-7, help='weight of smooth loss')
 parser.add_argument('--lambda_normal', type=float, default=1e-3, help='weight of normal loss')
 parser.add_argument('--lambda_uniform', type=float, default=1e-6, help='weight of uniform loss')
@@ -59,7 +59,7 @@ random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=True, train=True, class_choice='lumbar_vertebra_05')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
@@ -83,12 +83,10 @@ faces_cuda = torch.from_numpy(faces.astype(int)).type(torch.cuda.LongTensor)
 vertices_sphere = np.array(mesh['v'])
 # vertices_sphere = mesh['vertices']
 
-vertices_sphere = (vertices_sphere + 1.) / 2. # normalize
-
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0, 1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 edge_cuda = get_edges(faces)
-parameters = smoothness_loss_parameters(faces)
+# parameters = smoothness_loss_parameters(faces)
 
 network = SVR_TMNet_Split()
 network.apply(weights_init)
@@ -173,15 +171,18 @@ for epoch in range(opt.nepoch):
         points = points.float()
         points_choice = points_choice.float()
         normals_choice = normals_choice.float()
-        vertices_input = (vertices_sphere.reshape(img.size(0), vertices_sphere.size(2),
-                                                 vertices_sphere.size(1)).contiguous())
+        vertices_input = (vertices_sphere.reshape(img.size(0), vertices_sphere.size(1),
+                                                 vertices_sphere.size(2)).contiguous())
+        # vertices_input = (vertices_input + 1.) / 2.
 
         # Split Regions
-        b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
+        b_range = np.array([[-1.0, 0.0, 1.0 + 1e-5], [-1.0, 0.0, 1.0 + 1e-5], [-1.0, 0.0, 1.0 + 1e-5]])
         b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
         points_choice_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
         b_f_list_gen = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
         vertices_input_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        range_part = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        pointsRec_parts =  np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
 
         b_v_i = 0
         for x_i in range(0, (b_range[0].shape[0] - 1)):
@@ -203,14 +204,20 @@ for epoch in range(opt.nepoch):
                     # Comparison between vertices of generated mesh
                     b_f_list_gen[b_v_i] = []
                     vertices_input_parts[b_v_i] = []
-                    for e_i in range(0, vertices_input.shape[1]):
-                        if b_range[0][x_i] <= vertices_input[0, e_i, 0] < b_range[0][x_i + 1] and \
-                                b_range[1][y_i] <= vertices_input[0, e_i, 1] < b_range[0][y_i + 1] and \
-                                b_range[2][z_i] <= vertices_input[0, e_i, 2] < b_range[2][z_i + 1]:
+                    for e_i in range(0, vertices_input.shape[2]):
+                        if b_range[0][x_i] <= vertices_input[0, 0, e_i] < b_range[0][x_i + 1] and \
+                                b_range[1][y_i] <= vertices_input[0, 1, e_i] < b_range[0][y_i + 1] and \
+                                b_range[2][z_i] <= vertices_input[0, 2, e_i] < b_range[2][z_i + 1]:
                             b_f_list_gen[b_v_i].append(e_i)
-                            vertices_input_parts[b_v_i].append(vertices_input[0, e_i, :])
+                            vertices_input_parts[b_v_i].append(vertices_input[0, :, e_i])
                     b_f_list_gen[b_v_i] = torch.tensor(b_f_list_gen[b_v_i])
                     vertices_input_parts[b_v_i] = torch.stack(vertices_input_parts[b_v_i], dim=1)
+
+                    range_part[b_v_i] = [b_range[0][x_i], b_range[0][x_i+1], b_range[1][y_i], b_range[1][y_i+1],
+                                         b_range[2][z_i], b_range[0][z_i+1], ]
+
+                    vertices_input_parts[b_v_i] = vertices_input_parts[b_v_i].reshape(1, vertices_input_parts[b_v_i].size(0),
+                                                 vertices_input_parts[b_v_i].size(1)).contiguous()
 
                     b_v_i = b_v_i + 1
 
@@ -218,23 +225,44 @@ for epoch in range(opt.nepoch):
 
         CD_loss_part = 0.0
         pointsRec = torch.tensor([])
+        points_orig_recon = torch.tensor([])
         faces_recon = torch.tensor([])
         pointsRec = pointsRec.cuda()
+
         for b_v_idx in range(0, vertices_input_parts.shape[0]):
 
-            dist1_p, dist2_p, _, _ = distChamfer(points_choice_parts[b_v_idx].unsqueeze(dim=0), pointsRec_parts[b_v_idx].detach())
+            b_v_r_min = torch.tensor([range_part[b_v_idx][0], range_part[b_v_idx][2], range_part[b_v_idx][4]])
+            b_v_r_max = torch.tensor([range_part[b_v_idx][1], range_part[b_v_idx][3], range_part[b_v_idx][5]])
+            b_v_r_min = b_v_r_min.float()
+            b_v_r_max = b_v_r_max.float()
+            b_v_r_min = b_v_r_min.cuda()
+            b_v_r_max = b_v_r_max.cuda()
+
+            pointsRec_max = torch.max(pointsRec_parts[b_v_idx], axis=1).values
+            pointsRec_min = torch.min(pointsRec_parts[b_v_idx], axis=1).values
+            pointsRec_parts[b_v_idx] = (pointsRec_parts[b_v_idx] - pointsRec_min) / (pointsRec_max - pointsRec_min + 1e-4)
+            pointsRec_parts[b_v_idx] = b_v_r_min + (b_v_r_max - b_v_r_min) * pointsRec_parts[b_v_idx]
+
+            ptr_gt = points_choice_parts[b_v_idx].reshape(1, points_choice_parts[b_v_idx].size(1), points_choice_parts[b_v_idx].size(0))
+            dist1_p, dist2_p, _, _ = distChamfer(pointsRec_parts[b_v_idx], ptr_gt.detach())
             CD_loss_part = torch.mean(dist1_p) + torch.mean(dist2_p)
             # print("CD Loss Part " + str(b_v_idx) + " : " + str(CD_loss_part.item()))
             if b_v_idx == 0:
                 pointsRec = pointsRec_parts[b_v_idx]
                 faces_recon = b_f_list_gen[b_v_idx]
+                points_orig_recon = points_choice_parts[b_v_idx]
             else:
                 pointsRec = torch.concat([pointsRec, pointsRec_parts[b_v_idx]], dim=1)
                 faces_recon = torch.concat([faces_recon, b_f_list_gen[b_v_idx]], dim=0)
+                points_orig_recon = torch.concat([points_orig_recon, points_choice_parts[b_v_idx]], dim=1)
 
-        CD_loss_part = CD_loss_part / float(vertices_input_parts.shape[0])
+        # CD_loss_part = CD_loss_part / float(vertices_input_parts.shape[0])
         faces_recon = faces_recon.cuda()
-        pointsRec = torch.index_select(pointsRec, 1, faces_recon)
+
+        if vertices_input_parts.shape[0] > 0:
+            pointsRec = torch.index_select(pointsRec, 1, faces_recon)
+            # points_orig_recon = points_orig_recon.reshape(1, points_orig_recon.size(1), points_orig_recon.size(0))
+            points_orig_recon = torch.index_select(points_orig_recon, 1, faces_recon)
 
         dist1, dist2, _, idx2 = distChamfer(points_choice, pointsRec)
         pointsRec_samples, _ = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
@@ -259,7 +287,7 @@ for epoch in range(opt.nepoch):
         CDs_loss = torch.mean(dist1_samples) + torch.mean(dist2_samples)
         l2_loss = calculate_l2_loss(error, error_GT.detach())
         # edge_loss = get_edge_loss_stage1(pointsRec, edge_cuda.detach())
-        edge_loss = get_edge_loss_stage1_whmr(pointsRec, points_orig, edge_cuda.detach(), edge_cuda_gt) ###### ERROR ######
+        edge_loss = get_edge_loss_stage1_whmr(pointsRec, points_orig, edge_cuda.detach(), edge_cuda_gt)
         # smoothness_loss = get_smoothness_loss_stage1(pointsRec, parameters)
         faces_cuda_bn = faces_cuda.unsqueeze(0).expand(pointsRec.size(0), faces_cuda.size(0),faces_cuda.size(1))
         # normal_loss = get_normal_loss(pointsRec, faces_cuda_bn, normals, idx2)
@@ -268,15 +296,14 @@ for epoch in range(opt.nepoch):
         # uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
         # uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(),b_v_list_gen, b_v_list_gt)
 
-        loss_net = CD_loss + CD_loss_part + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss # + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
+        loss_net = CD_loss + CD_loss_part + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss # + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
 
-        with autograd.detect_anomaly():
-            loss_net.backward()
-            train_CD_loss.update(CD_loss.item())
-            train_CD_loss.update(CD_loss_part.item())
-            train_CDs_loss.update(CDs_loss.item())
-            train_l2_loss.update(l2_loss.item())
-            optimizer.step()
+        loss_net.backward()
+        train_CD_loss.update(CD_loss.item())
+        train_CD_loss.update(CD_loss_part.item())
+        train_CDs_loss.update(CDs_loss.item())
+        train_l2_loss.update(l2_loss.item())
+        optimizer.step()
 
         # VIZUALIZE
         if i % 50 <= 0:
@@ -325,11 +352,12 @@ for epoch in range(opt.nepoch):
             choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
             points_choice = points[:, choice, :].contiguous()
             points_choice = points_choice.float()
-            vertices_input = (vertices_sphere.reshape(img.size(0), vertices_sphere.size(2),
-                                                     vertices_sphere.size(1)).contiguous())
+            vertices_input = (vertices_sphere.reshape(img.size(0), vertices_sphere.size(1),
+                                                     vertices_sphere.size(2)).contiguous())
+            # vertices_input = (vertices_input + 1.) / 2.
 
             # Split Regions
-            b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
+            b_range = np.array([[-1.0, 0.0, 1.0 + 1e-5], [-1.0, 0.0, 1.0 + 1e-5], [-1.0, 0.0, 1.0 + 1e-5]])
             b_f_list_gt = np.empty(
                 (((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
             points_choice_parts = np.empty(
@@ -359,14 +387,20 @@ for epoch in range(opt.nepoch):
                         # Comparison between vertices of generated mesh
                         b_f_list_gen[b_v_i] = []
                         vertices_input_parts[b_v_i] = []
-                        for e_i in range(0, vertices_input.shape[1]):
-                            if b_range[0][x_i] <= vertices_input[0, e_i, 0] < b_range[0][x_i + 1] and \
-                                    b_range[1][y_i] <= vertices_input[0, e_i, 1] < b_range[0][y_i + 1] and \
-                                    b_range[2][z_i] <= vertices_input[0, e_i, 2] < b_range[2][z_i + 1]:
+                        for e_i in range(0, vertices_input.shape[2]):
+                            if b_range[0][x_i] <= vertices_input[0, 0, e_i] < b_range[0][x_i + 1] and \
+                                    b_range[1][y_i] <= vertices_input[0, 1, e_i] < b_range[0][y_i + 1] and \
+                                    b_range[2][z_i] <= vertices_input[0, 2, e_i] < b_range[2][z_i + 1]:
                                 b_f_list_gen[b_v_i].append(e_i)
-                                vertices_input_parts[b_v_i].append(vertices_input[0, e_i, :])
+                                vertices_input_parts[b_v_i].append(vertices_input[0, :, e_i])
                         b_f_list_gen[b_v_i] = torch.tensor(b_f_list_gen[b_v_i])
                         vertices_input_parts[b_v_i] = torch.stack(vertices_input_parts[b_v_i], dim=1)
+
+                        range_part[b_v_i] = [b_range[0][x_i], b_range[0][x_i + 1], b_range[1][y_i], b_range[1][y_i + 1],
+                                             b_range[2][z_i], b_range[0][z_i + 1], ]
+
+                        vertices_input_parts[b_v_i] = vertices_input_parts[b_v_i].reshape \
+                            (1, vertices_input_parts[b_v_i].size(0), vertices_input_parts[b_v_i].size(1)).contiguous()
 
                         b_v_i = b_v_i + 1
 
@@ -374,25 +408,48 @@ for epoch in range(opt.nepoch):
 
             CD_loss_part = 0.0
             pointsRec = torch.tensor([])
+            points_orig_recon = torch.tensor([])
             faces_recon = torch.tensor([])
             pointsRec = pointsRec.cuda()
+
             for b_v_idx in range(0, vertices_input_parts.shape[0]):
 
-                dist1_p, dist2_p, _, _ = distChamfer(points_choice_parts[b_v_idx].unsqueeze(dim=0),
-                                                     pointsRec_parts[b_v_idx].detach())
+                b_v_r_min = torch.tensor([range_part[b_v_idx][0], range_part[b_v_idx][2], range_part[b_v_idx][4]])
+                b_v_r_max = torch.tensor([range_part[b_v_idx][1], range_part[b_v_idx][3], range_part[b_v_idx][5]])
+                b_v_r_min = b_v_r_min.float()
+                b_v_r_max = b_v_r_max.float()
+                b_v_r_min = b_v_r_min.cuda()
+                b_v_r_max = b_v_r_max.cuda()
+
+                pointsRec_max = torch.max(pointsRec_parts[b_v_idx], axis=1).values
+                pointsRec_min = torch.min(pointsRec_parts[b_v_idx], axis=1).values
+                pointsRec_parts[b_v_idx] = (pointsRec_parts[b_v_idx] - pointsRec_min) / (
+                            pointsRec_max - pointsRec_min + 1e-4)
+                pointsRec_parts[b_v_idx] = b_v_r_min + (b_v_r_max - b_v_r_min) * pointsRec_parts[b_v_idx]
+
+                ptr_gt = points_choice_parts[b_v_idx].reshape(1, points_choice_parts[b_v_idx].size(1),
+                                                              points_choice_parts[b_v_idx].size(0))
+                dist1_p, dist2_p, _, _ = distChamfer(pointsRec_parts[b_v_idx], ptr_gt.detach())
                 CD_loss_part = torch.mean(dist1_p) + torch.mean(dist2_p)
                 # print("CD Loss Part " + str(b_v_idx) + " : " + str(CD_loss_part.item()))
                 if b_v_idx == 0:
                     pointsRec = pointsRec_parts[b_v_idx]
                     faces_recon = b_f_list_gen[b_v_idx]
+                    points_orig_recon = points_choice_parts[b_v_idx]
                 else:
                     pointsRec = torch.concat([pointsRec, pointsRec_parts[b_v_idx]], dim=1)
                     faces_recon = torch.concat([faces_recon, b_f_list_gen[b_v_idx]], dim=0)
+                    points_orig_recon = torch.concat([points_orig_recon, points_choice_parts[b_v_idx]], dim=1)
 
-            CD_loss_part = CD_loss_part / float(vertices_input_parts.shape[0])
+            # CD_loss_part = CD_loss_part / float(vertices_input_parts.shape[0])
             faces_recon = faces_recon.cuda()
-            pointsRec = torch.index_select(pointsRec, 1, faces_recon)
 
+            if vertices_input_parts.shape[0] > 0:
+                pointsRec = torch.index_select(pointsRec, 1, faces_recon)
+                # points_orig_recon = points_orig_recon.reshape(1, points_orig_recon.size(1), points_orig_recon.size(0))
+                points_orig_recon = torch.index_select(points_orig_recon, 1, faces_recon)
+
+            # pointsRec = pointsRec.unsqueeze(dim=0)
             dist1, dist2, idx1, idx2 = distChamfer(points_choice, pointsRec)
 
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
@@ -424,7 +481,7 @@ for epoch in range(opt.nepoch):
             # uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
             # uniform_loss_local = get_uniform_loss_local(b_v_list_gen.squeeze().cpu().data.numpy(), b_v_list_gt.squeeze().cpu().data.numpy())
 
-            loss_net = CD_loss + l2_loss + opt.lambda_edge * edge_loss + opt.lambda_normal * normal_loss # + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
+            loss_net = CD_loss + CD_loss_part  + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss # + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
 
             val_CD_loss.update(CD_loss.item())
             dataset_test.perCatValueMeter[cat[0]].update(CDs_loss.item())

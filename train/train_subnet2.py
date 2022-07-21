@@ -23,9 +23,9 @@ parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=12)
 parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for')
 parser.add_argument('--epoch_decay',type=int,default=100, help='epoch to decay lr ')
-parser.add_argument('--model', type=str,default='./log/SVR_subnet2_usage/network.pth',help='model path from the trained subnet1')
+parser.add_argument('--model', type=str,default='',help='model path from the trained subnet1')
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud')
-parser.add_argument('--num_vertices', type=int, default=7682)
+parser.add_argument('--num_vertices', type=int, default=2562)
 parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation')
 parser.add_argument('--env', type=str, default="SVR_subnet2", help='visdom env')
 parser.add_argument('--lr', type=float, default=1e-5)
@@ -41,7 +41,7 @@ opt = parser.parse_args()
 print(opt)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 
 sys.path.append("./extension/")
 import dist_chamfer as ext
@@ -70,22 +70,22 @@ print('training set', len(dataset.datapath))
 print('testing set', len(dataset_test.datapath))
 len_dataset = len(dataset)
 
-# name = 'sphere' + str(opt.num_vertices) + '.mat'
-# mesh = sio.loadmat('./data/' + name)
-name = 'sphere' + str(opt.num_vertices) + '.obj'
-mesh = meshio_custom.read_obj('./data/' + name)
+name = 'sphere' + str(opt.num_vertices) + '.mat'
+mesh = sio.loadmat('./data/' + name)
+# name = 'sphere' + str(opt.num_vertices) + '.obj'
+# mesh = meshio_custom.read_obj('./data/' + name)
 
-# faces = np.array(mesh['f'])
-faces = mesh['faces']
+faces = np.array(mesh['f'])
+# faces = mesh['faces']
 faces_cuda = torch.from_numpy(faces.astype(int)).type(torch.cuda.LongTensor)
 
-# vertices_sphere = np.array(mesh['v'])
-vertices_sphere = mesh['vertices']
+vertices_sphere = np.array(mesh['v'])
+# vertices_sphere = mesh['vertices']
 
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0, 1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 edge_cuda = get_edges(faces)
-parameters = smoothness_loss_parameters(faces)
+# parameters = smoothness_loss_parameters(faces)
 
 network = SVR_TMNet()
 network.apply(weights_init)

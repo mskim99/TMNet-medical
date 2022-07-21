@@ -96,6 +96,7 @@ class ShapeNet(data.Dataset):
         points_max = np.max(points_origin, axis=0)
         points_min = np.min(points_origin, axis=0)
         points_origin = (points_origin - points_min) / (points_max - points_min)
+        points_origin = 2. * points_origin - 1.
 
         indices = np.random.randint(points_origin.shape[0], size=self.npoints)
         points_sampled = points_origin[indices,:]

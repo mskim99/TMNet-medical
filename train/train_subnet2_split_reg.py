@@ -5,8 +5,8 @@ import numpy as np
 import torch
 import torch.optim as optim
 import sys
-sys.path.append('./auxiliary/')
 
+sys.path.append('./auxiliary/')
 from dataset_3D import *
 from model_3D import *
 from utils import *
@@ -18,6 +18,9 @@ import visdom
 import scipy.io as sio
 from loss import *
 
+sys.path.append('./utils/')
+from split_mesh import *
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=12)
@@ -26,7 +29,7 @@ parser.add_argument('--epoch_decay',type=int,default=100, help='epoch to decay l
 parser.add_argument('--model', type=str,default='./log/SVR_subnet2_usage/network.pth',help='model path from the trained subnet1')
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud')
 parser.add_argument('--num_vertices', type=int, default=2562)
-parser.add_argument('--num_samples',type=int,default=2500, help='number of samples for error estimation')
+parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation')
 parser.add_argument('--env', type=str, default="SVR_subnet2_1", help='visdom env')
 parser.add_argument('--lr', type=float, default=1e-5)
 parser.add_argument('--tau', type=float, default=0.1)
@@ -41,14 +44,14 @@ opt = parser.parse_args()
 print(opt)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 
 sys.path.append("./extension/")
 import dist_chamfer as ext
 distChamfer = ext.chamferDist()
 
 server = 'http://localhost/'
-vis = visdom.Visdom(server=server, port=8886, env=opt.env, use_incoming_socket=False)
+vis = visdom.Visdom(server=server, port=8887, env=opt.env, use_incoming_socket=False)
 now = datetime.datetime.now()
 save_path = opt.env
 dir_name = os.path.join('./log', save_path)
@@ -72,15 +75,22 @@ len_dataset = len(dataset)
 
 name = 'sphere' + str(opt.num_vertices) + '.mat'
 mesh = sio.loadmat('./data/' + name)
+# name = 'sphere' + str(opt.num_vertices) + '.obj'
+# mesh = meshio_custom.read_obj('./data/' + name)
+
 faces = np.array(mesh['f'])
+# faces = mesh['faces']
 faces_cuda = torch.from_numpy(faces.astype(int)).type(torch.cuda.LongTensor)
+
 vertices_sphere = np.array(mesh['v'])
+# vertices_sphere = mesh['vertices']
+
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0, 1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 edge_cuda = get_edges(faces)
-parameters = smoothness_loss_parameters(faces)
+# parameters = smoothness_loss_parameters(faces)
 
-network = SVR_TMNet()
+network = SVR_TMNet_Split()
 network.apply(weights_init)
 network.cuda()
 if opt.model != '':
@@ -148,41 +158,21 @@ for epoch in range(opt.nepoch):
                                                  vertices_sphere.size(2)).contiguous())
 
         with torch.no_grad():
-            pointsRec = network(img, vertices_input, mode='deform1')
+
+            b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part = split_mesh(points_choice, vertices_input, level=0)
+            pointsRec_parts = network(img, vertices_input_parts, mode='deform1')
+            pointsRec, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen)
+
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
             error_stage1 = network(img, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
             faces_cuda_bn = faces_cuda.unsqueeze(0).expand(img.size(0), faces_cuda.size(0), faces_cuda.size(1))
             faces_cuda_bn = prune(faces_cuda_bn.detach(), error_stage1.detach(), opt.tau, index, opt.pool)
 
-
-        # Split Regions
-        b_range = np.array([[0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5], [0.0, 0.5, 1.0 + 1e-5]])
-        b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
-                               dtype=object)
-        points_choice_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),),
-                               dtype=object)
-
-        b_v_idx = 0
-        for x_i in range(0, (b_range[0].shape[0] - 1)):
-            for y_i in range(0, (b_range[1].shape[0] - 1)):
-                for z_i in range(0, (b_range[2].shape[0] - 1)):
-
-                    # Comparison between vertices of ground truth mesh
-                    b_f_list_gt[b_v_idx] = []
-                    for e_i in range(0, points_choice.shape[0]):
-                        if b_range[0][x_i] <= points_choice[e_i][0] < b_range[0][x_i + 1] and \
-                                b_range[1][y_i] <= points_choice[e_i][1] < b_range[0][y_i + 1] and \
-                                b_range[2][z_i] <= points_choice[e_i][2] < b_range[2][z_i + 1]:
-                            b_f_list_gt[b_v_idx].append(e_i)
-                    b_f_list_gt[b_v_idx] = np.array(b_f_list_gt[b_v_idx])
-                    points_choice_parts[b_v_idx] = np.array(pointsRec[b_f_list_gt[b_v_idx]])
-
-        pointsRec2 = network(img, points_choice_parts, mode='deform2')
+        b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=0)
+        pointsRec2_parts = network(img, pointsRec_parts, mode='deform2')
+        pointsRec2, _, CD_loss_part2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2)
         _, _, _, idx2 = distChamfer(points, pointsRec2)
         _, _, _, idx2_choice = distChamfer(points_choice, pointsRec2)
-
-        print(points.shape)
-        print(pointsRec2.shape)
 
         pointsRec2_samples, _ = samples_random(faces_cuda_bn.detach(), pointsRec2, opt.num_points)
         dist12_samples, dist22_samples, _, _ = distChamfer(points, pointsRec2_samples)
@@ -202,22 +192,19 @@ for epoch in range(opt.nepoch):
         normals_gen = normals_gen / normals_gen_len.reshape(-1, 1)
         pointsRec2 = torch.unsqueeze(pointsRec2, 0)
 
-        print(normals_gen.shape)
-        print(normals.shape)
-        print(idx2.shape)
-
         cds_stage2 = (torch.mean(dist12_samples)) + (torch.mean(dist22_samples))
         l2_loss = calculate_l2_loss(error, error_GT.detach())
         # normal_loss = get_normal_loss(pointsRec2, faces_cuda_bn, normals, idx2)
-        normal_loss = get_normal_loss_mdf(normals_gen, normals_choice, idx2)
+        normal_loss = get_normal_loss_mdf(normals_gen, normals_choice, idx2_choice)
         # edge_loss = get_edge_loss(pointsRec2, faces_cuda_bn)
         edge_loss = get_edge_loss_stage1_whmr(pointsRec2, points_orig, edge_cuda, edge_cuda_gt)
-        smoothness_loss = get_smoothness_loss(pointsRec2, parameters, faces_cuda_bn)
+        # smoothness_loss = get_smoothness_loss(pointsRec2, parameters, faces_cuda_bn)
 
-        uniform_loss_global = get_uniform_loss_global(pointsRec2.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+        # uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec2.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+        # uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(), b_v_list_gen, b_v_list_gt)
 
-        loss_net = cds_stage2 + opt.lambda_normal * normal_loss + opt.lambda_edge * edge_loss + \
-                   opt.lambda_smooth * smoothness_loss + l2_loss + opt.lambda_uniform_glob * uniform_loss_global
+        loss_net = cds_stage2 + CD_loss_part2 + opt.lambda_normal * normal_loss + opt.lambda_edge * edge_loss + \
+                   l2_loss # + opt.lambda_smooth * smoothness_loss + opt.lambda_uniform_glob * uniform_loss_global * uniform_loss_local
 
         loss_net.backward()
         train_CDs_stage2_loss.update(cds_stage2.item())
@@ -242,9 +229,9 @@ for epoch in range(opt.nepoch):
                         ),
                         )
         print(
-            '[%d: %d/%d] train_cd_loss:  %f , l2_loss: %f, edge_loss: %f, smoothness_loss: %f, normal_loss: %f, uniform_loss_global: %f, loss_net: %f'
-            % (epoch, i, len(dataset_test) / opt.batchSize, cds_stage2.item(), l2_loss.item(), edge_loss.item(),
-               smoothness_loss.item(), normal_loss.item(), uniform_loss_global, loss_net.item()))
+            '[%d: %d/%d] train_cd_loss:  %f , l2_loss: %f, edge_loss: %f, normal_loss: %f, loss_net: %f'
+            % (epoch, i, len(dataset) / opt.batchSize, cds_stage2.item(), l2_loss.item(), edge_loss.item(),
+               normal_loss.item(), loss_net.item()))
 
     train_l2_curve.append(train_l2_loss.avg)
     train_CDs_stage2_curve.append(train_CDs_stage2_loss.avg)
@@ -274,14 +261,20 @@ for epoch in range(opt.nepoch):
             vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                      vertices_sphere.size(2)).contiguous())
 
-            pointsRec = network(img, vertices_input, mode='deform1')  # vertices_sphere 3*2562
+            b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part = split_mesh(points_choice, vertices_input, level=0)
+            pointsRec_parts = network(img, vertices_input_parts, mode='deform1')
+            pointsRec, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen)
+
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
             error = network(img, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
             faces_cuda_bn = faces_cuda.unsqueeze(0).expand(img.size(0), faces_cuda.size(0), faces_cuda.size(1))
             faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau, index, opt.pool)
 
-            pointsRec2 = network(img, pointsRec, mode='deform2')
+            b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=0)
+            pointsRec2_parts = network(img, pointsRec_parts, mode='deform2')
+            pointsRec2, _, CD_loss_part2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2)
             _, _, _, idx2 = distChamfer(points, pointsRec2)
+            _, _, _, idx2_choice = distChamfer(points_choice, pointsRec2)
 
             pointsRec2_samples, index = samples_random(faces_cuda_bn, pointsRec2, opt.num_points)
             dist12_samples, dist22_samples, _, _ = distChamfer(points, pointsRec2_samples)
@@ -305,15 +298,16 @@ for epoch in range(opt.nepoch):
             cds_stage2 = (torch.mean(dist12_samples)) + (torch.mean(dist22_samples))
             l2_loss = calculate_l2_loss(error, error_GT.detach())
             # normal_loss = get_normal_loss(pointsRec2, faces_cuda_bn, normals, idx2)
-            normal_loss = get_normal_loss_mdf(normals_gen, normals, idx2)
+            normal_loss = get_normal_loss_mdf(normals_gen, normals, idx2_choice)
             # edge_loss = get_edge_loss(pointsRec2, faces_cuda_bn)
             edge_loss = get_edge_loss_stage1_whmr(pointsRec2, points_orig, edge_cuda, edge_cuda_gt)
-            smoothness_loss = get_smoothness_loss(pointsRec2, parameters, faces_cuda_bn)
+            # smoothness_loss = get_smoothness_loss(pointsRec2, parameters, faces_cuda_bn)
 
-            uniform_loss_global = get_uniform_loss_global(pointsRec2.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+            # uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec2.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
+            # uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(),b_v_list_gen, b_v_list_gt)
 
             loss_net = cds_stage2 + opt.lambda_normal * normal_loss + opt.lambda_edge * edge_loss + \
-                   opt.lambda_smooth * smoothness_loss + l2_loss + opt.lambda_uniform_glob * uniform_loss_global
+                  l2_loss # +  opt.lambda_smooth * smoothness_loss + opt.lambda_uniform_glob * uniform_loss_global * uniform_loss_local
 
             val_CDs_stage2_loss.update(cds_stage2.item())
             val_l2_loss.update(l2_loss.item())
@@ -337,9 +331,9 @@ for epoch in range(opt.nepoch):
                             )
 
             print(
-                '[%d: %d/%d] val_cd_loss:  %f , l2_loss: %f, edge_loss: %f, smoothness_loss: %f, normal_loss: %f, uniform_loss_global: %f, loss_net: %f'
+                '[%d: %d/%d] val_cd_loss:  %f , l2_loss: %f, edge_loss: %f, normal_loss: %f, loss_net: %f'
                 % (epoch, i, len(dataset_test) / opt.batchSize, cds_stage2.item(), l2_loss.item(), edge_loss.item(),
-                   smoothness_loss.item(), normal_loss.item(), uniform_loss_global, loss_net.item()))
+                   normal_loss.item(), loss_net.item()))
 
         val_l2_curve.append(val_l2_loss.avg)
         val_CDs_stage2_curve.append(val_CDs_stage2_loss.avg)

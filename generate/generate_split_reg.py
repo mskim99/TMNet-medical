@@ -20,13 +20,13 @@ import sklearn.preprocessing as sklp
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=6)
-parser.add_argument('--model', type=str, default = './log/SVR_subnet1_1/network.pth',  help='your path to the trained model')
+parser.add_argument('--model', type=str, default = './log/SVR_subnet1_2/network.pth',  help='your path to the trained model')
 parser.add_argument('--num_points',type=int,default=10000)
 parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
 parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
 parser.add_argument('--num_vertices', type=int, default=7682) # 2562
-parser.add_argument('--subnet',type=int,default=2)
+parser.add_argument('--subnet',type=int,default=1)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
@@ -63,7 +63,7 @@ vertices_sphere = mesh['vertices']
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0,1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 
-network = SVR_TMNet()
+network = SVR_TMNet_Split()
 network.apply(weights_init)
 network.cuda()
 
@@ -88,9 +88,101 @@ with torch.no_grad():
         points = points.cuda()
         choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
         points_choice = points[:, choice, :].contiguous()
+        points = points.float()
+        points_choice = points_choice.float()
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                  vertices_sphere.size(2)).contiguous())
-        pointsRec  = network(img, vertices_input,mode='deform1')
+
+        # Split Regions
+        b_range = np.array([[-1.0, 0.0, 1.0 + 1e-5], [-1.0, 0.0, 1.0 + 1e-5], [-1.0, 0.0, 1.0 + 1e-5]])
+        b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        points_choice_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        b_f_list_gen = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        vertices_input_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        range_part = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        pointsRec_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+
+        b_v_i = 0
+        for x_i in range(0, (b_range[0].shape[0] - 1)):
+            for y_i in range(0, (b_range[1].shape[0] - 1)):
+                for z_i in range(0, (b_range[2].shape[0] - 1)):
+
+                    # Comparison between vertices of ground truth mesh
+                    b_f_list_gt[b_v_i] = []
+                    points_choice_parts[b_v_i] = []
+                    for e_i in range(0, points_choice.shape[1]):
+                        if b_range[0][x_i] <= points_choice[0, e_i, 0] < b_range[0][x_i + 1] and \
+                                b_range[1][y_i] <= points_choice[0, e_i, 1] < b_range[1][y_i + 1] and \
+                                b_range[2][z_i] <= points_choice[0, e_i, 2] < b_range[2][z_i + 1]:
+                            b_f_list_gt[b_v_i].append(e_i)
+                            points_choice_parts[b_v_i].append(points_choice[0, e_i, :])
+                    b_f_list_gt[b_v_i] = torch.tensor(b_f_list_gt[b_v_i])
+                    points_choice_parts[b_v_i] = torch.stack(points_choice_parts[b_v_i], dim=1)
+
+                    # Comparison between vertices of generated mesh
+                    b_f_list_gen[b_v_i] = []
+                    vertices_input_parts[b_v_i] = []
+                    for e_i in range(0, vertices_input.shape[2]):
+                        if b_range[0][x_i] <= vertices_input[0, 0, e_i] < b_range[0][x_i + 1] and \
+                                b_range[1][y_i] <= vertices_input[0, 1, e_i] < b_range[0][y_i + 1] and \
+                                b_range[2][z_i] <= vertices_input[0, 2, e_i] < b_range[2][z_i + 1]:
+                            b_f_list_gen[b_v_i].append(e_i)
+                            vertices_input_parts[b_v_i].append(vertices_input[0, :, e_i])
+                    b_f_list_gen[b_v_i] = torch.tensor(b_f_list_gen[b_v_i])
+                    vertices_input_parts[b_v_i] = torch.stack(vertices_input_parts[b_v_i], dim=1)
+
+                    range_part[b_v_i] = [b_range[0][x_i], b_range[0][x_i + 1], b_range[1][y_i], b_range[1][y_i + 1],
+                                         b_range[2][z_i], b_range[0][z_i + 1], ]
+
+                    vertices_input_parts[b_v_i] = vertices_input_parts[b_v_i].reshape \
+                        (1, vertices_input_parts[b_v_i].size(0), vertices_input_parts[b_v_i].size(1)).contiguous()
+
+                    b_v_i = b_v_i + 1
+
+        pointsRec_parts = network(img, vertices_input_parts, mode='deform1')  # vertices_sphere 3*2562
+
+        CD_loss_part = 0.0
+        pointsRec = torch.tensor([])
+        points_orig_recon = torch.tensor([])
+        faces_recon = torch.tensor([])
+        pointsRec = pointsRec.cuda()
+
+        for b_v_idx in range(0, vertices_input_parts.shape[0]):
+
+            b_v_r_min = torch.tensor([range_part[b_v_idx][0], range_part[b_v_idx][2], range_part[b_v_idx][4]])
+            b_v_r_max = torch.tensor([range_part[b_v_idx][1], range_part[b_v_idx][3], range_part[b_v_idx][5]])
+            b_v_r_min = b_v_r_min.float()
+            b_v_r_max = b_v_r_max.float()
+            b_v_r_min = b_v_r_min.cuda()
+            b_v_r_max = b_v_r_max.cuda()
+
+            pointsRec_max = torch.max(pointsRec_parts[b_v_idx], axis=1).values
+            pointsRec_min = torch.min(pointsRec_parts[b_v_idx], axis=1).values
+            pointsRec_parts[b_v_idx] = (pointsRec_parts[b_v_idx] - pointsRec_min) / (
+                    pointsRec_max - pointsRec_min + 1e-4)
+            pointsRec_parts[b_v_idx] = b_v_r_min + (b_v_r_max - b_v_r_min) * pointsRec_parts[b_v_idx]
+
+            ptr_gt = points_choice_parts[b_v_idx].reshape(1, points_choice_parts[b_v_idx].size(1), points_choice_parts[b_v_idx].size(0))
+
+            dist1_p, dist2_p, _, _ = distChamfer(pointsRec_parts[b_v_idx], ptr_gt.detach())
+            CD_loss_part = torch.mean(dist1_p) + torch.mean(dist2_p)
+            # print("CD Loss Part " + str(b_v_idx) + " : " + str(CD_loss_part.item()))
+            if b_v_idx == 0:
+                pointsRec = pointsRec_parts[b_v_idx]
+                faces_recon = b_f_list_gen[b_v_idx]
+                points_orig_recon = points_choice_parts[b_v_idx]
+            else:
+                pointsRec = torch.concat([pointsRec, pointsRec_parts[b_v_idx]], dim=1)
+                faces_recon = torch.concat([faces_recon, b_f_list_gen[b_v_idx]], dim=0)
+                points_orig_recon = torch.concat([points_orig_recon, points_choice_parts[b_v_idx]], dim=1)
+
+        # CD_loss_part = CD_loss_part / float(vertices_input_parts.shape[0])
+        faces_recon = faces_recon.cuda()
+
+        if vertices_input_parts.shape[0] > 0:
+            pointsRec = torch.index_select(pointsRec, 1, faces_recon)
+            # points_orig_recon = points_orig_recon.reshape(1, points_orig_recon.size(1), points_orig_recon.size(0))
+            points_orig_recon = torch.index_select(points_orig_recon, 1, faces_recon)
 
         dist1, dist2, _, idx2 = distChamfer(points.float() , pointsRec.float()) # PointsRec > Points
 

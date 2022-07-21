@@ -495,36 +495,37 @@ class SVR_TMNet_Split(nn.Module):
     def __init__(self,  bottleneck_size = 1024):
         super(SVR_TMNet_Split, self).__init__()
         self.bottleneck_size = bottleneck_size
-        self.encoder = resnet_3D.resnet34_3D(num_classes=self.bottleneck_size)
-        self.decoder = nn.ModuleList([DeformNet(bottleneck_size=self.bottleneck_size)])
+        self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
+        self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.decoder2 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.estimate = Estimator(bottleneck_size=3 + self.bottleneck_size)
         self.estimate2 = Estimator(bottleneck_size=3+self.bottleneck_size)
         self.refine = Refiner(bottleneck_size=3 + self.bottleneck_size)
 
     def forward(self,x,points,vector1=0,vector2=0,mode='deform1'):
+
         x = x[:,:3,:,:].contiguous()
-
-        assert not torch.isnan(x).any()
-        assert not torch.isinf(x).any()
-
         x, _ = self.encoder(x)
-        '''
-        if points_parts.size(1) != 3:
-            points = points_parts.transpose(2,1)
-            
-        y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
-        y = torch.cat((points, y), 1).contiguous()
-        '''
+
         outs = []
         if mode == 'deform1':
             for i in range(0, points.shape[0]):
-                y = x.unsqueeze(2).expand(x.size(0), x.size(1), points[i].shape[1]).contiguous()
+                if points[i].size(1) != 3:
+                    points[i] = points[i].transpose(2, 1)
+                y = x.unsqueeze(2).expand(x.size(0), x.size(1), points[i].size(2)).contiguous()
+                y = torch.cat((points[i], y), 1).contiguous()
                 res = self.decoder[0](y, points[i].shape[1])
+                # res = res + points[i].unsqueeze(dim=0)
                 outs.append(res.contiguous().transpose(2,1).contiguous())
         elif mode == 'deform2':
-            outs = self.decoder2[0](y, 0)
-            outs = outs + points
+            for i in range(0, points.shape[0]):
+                if points[i].size(1) != 3:
+                    points[i] = points[i].transpose(2, 1)
+                y = x.unsqueeze(2).expand(x.size(0), x.size(1), points[i].size(2)).contiguous()
+                y = torch.cat((points[i], y), 1).contiguous()
+                res = self.decoder2[0](y, points[i].shape[1])
+                res = res + points[i]
+                outs.append(res.contiguous().transpose(2,1).contiguous())
         elif mode == 'estimate':
             if points.size(1) != 3:
                 points = points.transpose(2,1)
@@ -533,7 +534,12 @@ class SVR_TMNet_Split(nn.Module):
             outs = self.estimate(y)
             outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
         elif mode == 'estimate2':
+            if points.size(1) != 3:
+                points = points.transpose(2,1)
+            y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
+            y = torch.cat((points, y), 1).contiguous()
             outs = self.estimate2(y)
+            outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
         elif mode == 'refine':
             outs = self.refine(y)
             outs1 = outs[:, 0].unsqueeze(1)
