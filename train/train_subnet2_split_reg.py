@@ -161,7 +161,7 @@ for epoch in range(opt.nepoch):
 
             b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part = split_mesh(points_choice, vertices_input, level=0)
             pointsRec_parts = network(img, vertices_input_parts, mode='deform1')
-            pointsRec, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen)
+            pointsRec, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, True)
 
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
             error_stage1 = network(img, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
@@ -170,7 +170,7 @@ for epoch in range(opt.nepoch):
 
         b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=0)
         pointsRec2_parts = network(img, pointsRec_parts, mode='deform2')
-        pointsRec2, _, CD_loss_part2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2)
+        pointsRec2, _, CD_loss_part2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, True)
         _, _, _, idx2 = distChamfer(points, pointsRec2)
         _, _, _, idx2_choice = distChamfer(points_choice, pointsRec2)
 
@@ -263,7 +263,7 @@ for epoch in range(opt.nepoch):
 
             b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part = split_mesh(points_choice, vertices_input, level=0)
             pointsRec_parts = network(img, vertices_input_parts, mode='deform1')
-            pointsRec, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen)
+            pointsRec, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, True)
 
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
             error = network(img, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
@@ -272,7 +272,7 @@ for epoch in range(opt.nepoch):
 
             b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=0)
             pointsRec2_parts = network(img, pointsRec_parts, mode='deform2')
-            pointsRec2, _, CD_loss_part2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2)
+            pointsRec2, _, CD_loss_part2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, True)
             _, _, _, idx2 = distChamfer(points, pointsRec2)
             _, _, _, idx2_choice = distChamfer(points_choice, pointsRec2)
 

@@ -57,7 +57,7 @@ def split_mesh(points_choice, vertices_input, level=0):
     return b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part
 
 
-def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen):
+def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, norm=True):
     CD_loss_part = 0.0
     pointsRec = torch.tensor([])
     points_orig_recon = torch.tensor([])
@@ -66,18 +66,19 @@ def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, r
 
     for b_v_idx in range(0, vertices_input_parts.shape[0]):
 
-        b_v_r_min = torch.tensor([range_part[b_v_idx][0], range_part[b_v_idx][2], range_part[b_v_idx][4]])
-        b_v_r_max = torch.tensor([range_part[b_v_idx][1], range_part[b_v_idx][3], range_part[b_v_idx][5]])
-        b_v_r_min = b_v_r_min.float()
-        b_v_r_max = b_v_r_max.float()
-        b_v_r_min = b_v_r_min.cuda()
-        b_v_r_max = b_v_r_max.cuda()
+        if norm is True:
+            b_v_r_min = torch.tensor([range_part[b_v_idx][0], range_part[b_v_idx][2], range_part[b_v_idx][4]])
+            b_v_r_max = torch.tensor([range_part[b_v_idx][1], range_part[b_v_idx][3], range_part[b_v_idx][5]])
+            b_v_r_min = b_v_r_min.float()
+            b_v_r_max = b_v_r_max.float()
+            b_v_r_min = b_v_r_min.cuda()
+            b_v_r_max = b_v_r_max.cuda()
 
-        pointsRec_max = torch.max(pointsRec_parts[b_v_idx], axis=1).values
-        pointsRec_min = torch.min(pointsRec_parts[b_v_idx], axis=1).values
-        pointsRec_parts[b_v_idx] = (pointsRec_parts[b_v_idx] - pointsRec_min) / (
-                pointsRec_max - pointsRec_min + 1e-4)
-        pointsRec_parts[b_v_idx] = b_v_r_min + (b_v_r_max - b_v_r_min) * pointsRec_parts[b_v_idx]
+            pointsRec_max = torch.max(pointsRec_parts[b_v_idx], axis=1).values
+            pointsRec_min = torch.min(pointsRec_parts[b_v_idx], axis=1).values
+            pointsRec_parts[b_v_idx] = (pointsRec_parts[b_v_idx] - pointsRec_min) / (
+                    pointsRec_max - pointsRec_min + 1e-4)
+            pointsRec_parts[b_v_idx] = b_v_r_min + (b_v_r_max - b_v_r_min) * pointsRec_parts[b_v_idx]
 
         if b_v_idx == 0:
             pointsRec = pointsRec_parts[b_v_idx]
