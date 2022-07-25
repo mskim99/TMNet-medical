@@ -1,5 +1,12 @@
 import torch
 import numpy as np
+import sys
+
+import cv2
+
+sys.path.append('./extension/')
+import dist_chamfer as ext
+distChamfer = ext.chamferDist()
 
 def split_mesh(points_choice, vertices_input, level=0):
 
@@ -57,11 +64,43 @@ def split_mesh(points_choice, vertices_input, level=0):
     return b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part
 
 
-def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, norm=True):
+def split_volume(vol, level=0):
+
+    vol_part = np.empty(((level + 1) * (level + 1) * (level + 1)), dtype=object)
+
+    # Split Regions
+    if level == 0:
+        b_range = np.array([[0, 256], [0, 256], [0, 256]])
+    else:
+        b_range = np.array([[0, 128, 256], [0, 128, 256], [0, 128, 256]])
+
+    b_v_i = 0
+    for x_i in range(0, (b_range[0].shape[0] - 1)):
+        for y_i in range(0, (b_range[1].shape[0] - 1)):
+            for z_i in range(0, (b_range[2].shape[0] - 1)):
+                vol = torch.squeeze(vol)
+                vp = vol[b_range[0][x_i]:b_range[0][x_i+1], b_range[1][y_i]:b_range[1][y_i+1], b_range[2][z_i]:b_range[2][z_i+1]]
+                vp_resize = torch.zeros([256, 256, 256])
+                if level > 0:
+                    for i in range(0, vp.shape[2]):
+                        vp_resize_part = vp[:, :, i]
+                        vp_resize_part = cv2.resize(vp_resize_part.cpu().numpy(), (256, 256))
+                        vp_resize[:, :, i] = torch.tensor(vp_resize_part)
+                    vol_part[b_v_i] = torch.tensor(vp_resize)
+                else:
+                    vol_part[b_v_i] = vp
+                vol_part[b_v_i] = vol_part[b_v_i].unsqueeze(dim=0)
+                vol_part[b_v_i] = vol_part[b_v_i].unsqueeze(dim=0)
+                vol_part[b_v_i] = vol_part[b_v_i].cuda()
+                b_v_i = b_v_i + 1
+
+    return vol_part
+
+def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, faces=None, norm=True, level=0, scale=1.0):
     CD_loss_part = 0.0
     pointsRec = torch.tensor([])
     points_orig_recon = torch.tensor([])
-    faces_recon = torch.tensor([])
+    v_idx_recon = torch.tensor([])
     pointsRec = pointsRec.cuda()
 
     for b_v_idx in range(0, vertices_input_parts.shape[0]):
@@ -78,21 +117,39 @@ def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, r
             pointsRec_min = torch.min(pointsRec_parts[b_v_idx], axis=1).values
             pointsRec_parts[b_v_idx] = (pointsRec_parts[b_v_idx] - pointsRec_min) / (
                     pointsRec_max - pointsRec_min + 1e-4)
-            pointsRec_parts[b_v_idx] = b_v_r_min + (b_v_r_max - b_v_r_min) * pointsRec_parts[b_v_idx]
+            if level == 0:
+                pointsRec_parts[b_v_idx] = b_v_r_min + (b_v_r_max - b_v_r_min) * pointsRec_parts[b_v_idx]
+            elif level == 1:
+                pointsRec_parts[b_v_idx] = -0.5 + pointsRec_parts[b_v_idx]
+                pointsRec_parts[b_v_idx] = scale * pointsRec_parts[b_v_idx]
+                vip = vertices_input_parts[b_v_idx].reshape(1, vertices_input_parts[b_v_idx].size(2),
+                                                            vertices_input_parts[b_v_idx].size(1))
+                pointsRec_parts[b_v_idx] = pointsRec_parts[b_v_idx] + vip
+
+        points_choice_parts[b_v_idx] = points_choice_parts[b_v_idx].reshape(1, points_choice_parts[b_v_idx].size(1),
+                                                        points_choice_parts[b_v_idx].size(0))
+        dist1_p, dist2_p, _, _ = distChamfer(pointsRec_parts[b_v_idx], points_choice_parts[b_v_idx].detach())
+        CD_loss_part_bv = torch.mean(dist1_p) + torch.mean(dist2_p)
+        CD_loss_part = CD_loss_part + CD_loss_part_bv
 
         if b_v_idx == 0:
             pointsRec = pointsRec_parts[b_v_idx]
-            faces_recon = b_f_list_gen[b_v_idx]
+            v_idx_recon = b_f_list_gen[b_v_idx]
             points_orig_recon = points_choice_parts[b_v_idx]
         else:
             pointsRec = torch.concat([pointsRec, pointsRec_parts[b_v_idx]], dim=1)
-            faces_recon = torch.concat([faces_recon, b_f_list_gen[b_v_idx]], dim=0)
+            v_idx_recon = torch.concat([v_idx_recon, b_f_list_gen[b_v_idx]], dim=0)
             points_orig_recon = torch.concat([points_orig_recon, points_choice_parts[b_v_idx]], dim=1)
 
-    faces_recon = faces_recon.cuda()
+    CD_loss_part = CD_loss_part / float(vertices_input_parts.shape[0])
 
-    if vertices_input_parts.shape[0] > 0:
-        pointsRec = torch.index_select(pointsRec, 1, faces_recon)
-        points_orig_recon = torch.index_select(points_orig_recon, 1, faces_recon)
+    v_idx_recon = v_idx_recon.cuda()
+    faces_recon = None
 
-    return pointsRec, points_orig_recon, CD_loss_part
+    if vertices_input_parts.shape[0] > 1:
+        pointsRec_recon = torch.empty_like(pointsRec)
+        pointsRec_recon[:, v_idx_recon, :] = pointsRec
+    else:
+        pointsRec_recon = pointsRec
+
+    return pointsRec_recon, points_orig_recon, CD_loss_part, v_idx_recon, faces_recon

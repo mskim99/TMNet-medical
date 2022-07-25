@@ -4,6 +4,7 @@ import random
 import numpy as np
 import torch
 import sys
+
 sys.path.append('./auxiliary/')
 from dataset_3D import *
 from model_3D import *
@@ -16,17 +17,19 @@ from loss import *
 import meshio_custom
 import sklearn.preprocessing as sklp
 
+sys.path.append('./utils/')
+from split_mesh import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=6)
-parser.add_argument('--model', type=str, default = './log/SVR_subnet1_2/network.pth',  help='your path to the trained model')
+parser.add_argument('--model', type=str, default = './log/SVR_subnet2_usage2/network.pth',  help='your path to the trained model')
 parser.add_argument('--num_points',type=int,default=10000)
 parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
 parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
-parser.add_argument('--num_vertices', type=int, default=7682) # 2562
-parser.add_argument('--subnet',type=int,default=1)
+parser.add_argument('--num_vertices', type=int, default=2562) # 2562
+parser.add_argument('--subnet',type=int,default=2)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
@@ -49,17 +52,17 @@ dataloader_test = torch.utils.data.DataLoader(dataset_test, batch_size=opt.batch
 print('testing set', len(dataset_test.datapath))
 len_dataset = len(dataset_test)
 
-# name = 'sphere' + str(opt.num_vertices) + '.mat'
-# mesh = sio.loadmat('./data/' + name)
-name = 'sphere' + str(opt.num_vertices) + '.obj'
-mesh = meshio_custom.read_obj('./data/' + name)
+name = 'sphere' + str(opt.num_vertices) + '.mat'
+mesh = sio.loadmat('./data/' + name)
+# name = 'sphere' + str(opt.num_vertices) + '.obj'
+# mesh = meshio_custom.read_obj('./data/' + name)
 
-# faces = np.array(mesh['f'])
-faces = mesh['faces']
+faces = np.array(mesh['f'])
+# faces = mesh['faces']
 faces_cuda = torch.from_numpy(faces.astype(int)).type(torch.cuda.LongTensor)
 
-# vertices_sphere = np.array(mesh['v'])
-vertices_sphere = mesh['vertices']
+vertices_sphere = np.array(mesh['v'])
+# vertices_sphere = mesh['vertices']
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0,1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 
@@ -93,103 +96,17 @@ with torch.no_grad():
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                  vertices_sphere.size(2)).contiguous())
 
-        # Split Regions
-        b_range = np.array([[-1.0, 0.0, 1.0 + 1e-5], [-1.0, 0.0, 1.0 + 1e-5], [-1.0, 0.0, 1.0 + 1e-5]])
-        b_f_list_gt = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
-        points_choice_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
-        b_f_list_gen = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
-        vertices_input_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
-        range_part = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
-        pointsRec_parts = np.empty((((b_range[0].shape[0] - 1) * (b_range[1].shape[0] - 1) * (b_range[2].shape[0] - 1)),), dtype=object)
+        vol_part = split_volume(img, level=0)
+        b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part = split_mesh(points_choice, vertices_input, level=0)
+        pointsRec_parts = network(vol_part, vertices_input_parts, mode='deform1')  # vertices_sphere 3*2562
+        pointsRec, _, _, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, True, level=0, scale=1.)
 
-        b_v_i = 0
-        for x_i in range(0, (b_range[0].shape[0] - 1)):
-            for y_i in range(0, (b_range[1].shape[0] - 1)):
-                for z_i in range(0, (b_range[2].shape[0] - 1)):
-
-                    # Comparison between vertices of ground truth mesh
-                    b_f_list_gt[b_v_i] = []
-                    points_choice_parts[b_v_i] = []
-                    for e_i in range(0, points_choice.shape[1]):
-                        if b_range[0][x_i] <= points_choice[0, e_i, 0] < b_range[0][x_i + 1] and \
-                                b_range[1][y_i] <= points_choice[0, e_i, 1] < b_range[1][y_i + 1] and \
-                                b_range[2][z_i] <= points_choice[0, e_i, 2] < b_range[2][z_i + 1]:
-                            b_f_list_gt[b_v_i].append(e_i)
-                            points_choice_parts[b_v_i].append(points_choice[0, e_i, :])
-                    b_f_list_gt[b_v_i] = torch.tensor(b_f_list_gt[b_v_i])
-                    points_choice_parts[b_v_i] = torch.stack(points_choice_parts[b_v_i], dim=1)
-
-                    # Comparison between vertices of generated mesh
-                    b_f_list_gen[b_v_i] = []
-                    vertices_input_parts[b_v_i] = []
-                    for e_i in range(0, vertices_input.shape[2]):
-                        if b_range[0][x_i] <= vertices_input[0, 0, e_i] < b_range[0][x_i + 1] and \
-                                b_range[1][y_i] <= vertices_input[0, 1, e_i] < b_range[0][y_i + 1] and \
-                                b_range[2][z_i] <= vertices_input[0, 2, e_i] < b_range[2][z_i + 1]:
-                            b_f_list_gen[b_v_i].append(e_i)
-                            vertices_input_parts[b_v_i].append(vertices_input[0, :, e_i])
-                    b_f_list_gen[b_v_i] = torch.tensor(b_f_list_gen[b_v_i])
-                    vertices_input_parts[b_v_i] = torch.stack(vertices_input_parts[b_v_i], dim=1)
-
-                    range_part[b_v_i] = [b_range[0][x_i], b_range[0][x_i + 1], b_range[1][y_i], b_range[1][y_i + 1],
-                                         b_range[2][z_i], b_range[0][z_i + 1], ]
-
-                    vertices_input_parts[b_v_i] = vertices_input_parts[b_v_i].reshape \
-                        (1, vertices_input_parts[b_v_i].size(0), vertices_input_parts[b_v_i].size(1)).contiguous()
-
-                    b_v_i = b_v_i + 1
-
-        pointsRec_parts = network(img, vertices_input_parts, mode='deform1')  # vertices_sphere 3*2562
-
-        CD_loss_part = 0.0
-        pointsRec = torch.tensor([])
-        points_orig_recon = torch.tensor([])
-        faces_recon = torch.tensor([])
-        pointsRec = pointsRec.cuda()
-
-        for b_v_idx in range(0, vertices_input_parts.shape[0]):
-
-            b_v_r_min = torch.tensor([range_part[b_v_idx][0], range_part[b_v_idx][2], range_part[b_v_idx][4]])
-            b_v_r_max = torch.tensor([range_part[b_v_idx][1], range_part[b_v_idx][3], range_part[b_v_idx][5]])
-            b_v_r_min = b_v_r_min.float()
-            b_v_r_max = b_v_r_max.float()
-            b_v_r_min = b_v_r_min.cuda()
-            b_v_r_max = b_v_r_max.cuda()
-
-            pointsRec_max = torch.max(pointsRec_parts[b_v_idx], axis=1).values
-            pointsRec_min = torch.min(pointsRec_parts[b_v_idx], axis=1).values
-            pointsRec_parts[b_v_idx] = (pointsRec_parts[b_v_idx] - pointsRec_min) / (
-                    pointsRec_max - pointsRec_min + 1e-4)
-            pointsRec_parts[b_v_idx] = b_v_r_min + (b_v_r_max - b_v_r_min) * pointsRec_parts[b_v_idx]
-
-            ptr_gt = points_choice_parts[b_v_idx].reshape(1, points_choice_parts[b_v_idx].size(1), points_choice_parts[b_v_idx].size(0))
-
-            dist1_p, dist2_p, _, _ = distChamfer(pointsRec_parts[b_v_idx], ptr_gt.detach())
-            CD_loss_part = torch.mean(dist1_p) + torch.mean(dist2_p)
-            # print("CD Loss Part " + str(b_v_idx) + " : " + str(CD_loss_part.item()))
-            if b_v_idx == 0:
-                pointsRec = pointsRec_parts[b_v_idx]
-                faces_recon = b_f_list_gen[b_v_idx]
-                points_orig_recon = points_choice_parts[b_v_idx]
-            else:
-                pointsRec = torch.concat([pointsRec, pointsRec_parts[b_v_idx]], dim=1)
-                faces_recon = torch.concat([faces_recon, b_f_list_gen[b_v_idx]], dim=0)
-                points_orig_recon = torch.concat([points_orig_recon, points_choice_parts[b_v_idx]], dim=1)
-
-        # CD_loss_part = CD_loss_part / float(vertices_input_parts.shape[0])
-        faces_recon = faces_recon.cuda()
-
-        if vertices_input_parts.shape[0] > 0:
-            pointsRec = torch.index_select(pointsRec, 1, faces_recon)
-            # points_orig_recon = points_orig_recon.reshape(1, points_orig_recon.size(1), points_orig_recon.size(0))
-            points_orig_recon = torch.index_select(points_orig_recon, 1, faces_recon)
-
-        dist1, dist2, _, idx2 = distChamfer(points.float() , pointsRec.float()) # PointsRec > Points
+        _, _, _, idx2 = distChamfer(points.float() , pointsRec.float()) # PointsRec > Points
 
         pointsRec_samples, index = samples_random(faces_cuda, pointsRec, opt.num_points)
-        error = network(img, pointsRec_samples.detach().transpose(1, 2),mode='estimate')
+        error = network(vol_part, pointsRec_samples.detach().transpose(1, 2),mode='estimate')
         faces_cuda_bn = faces_cuda.unsqueeze(0)
-        faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau, index, opt.pool)
+        # faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau, index, opt.pool)
         triangles_c1 = faces_cuda_bn[0].cpu().data.numpy()
 
         pointsRec = torch.squeeze(pointsRec)
@@ -204,29 +121,40 @@ with torch.no_grad():
         normals_gen = normals_gen / normals_gen_len.reshape(-1, 1)
         pointsRec = torch.unsqueeze(pointsRec, 0)
 
-        # Validate normal flip
-        '''
-        for i in range (0, normals_gen.shape[0] - 1):
+        for i in range(0, normals_gen.shape[0] - 1):
             if torch.dot(normals_gen[i, :].cpu().float(), normals[0, idx2[0, i], :].float()).item() < 0.0:
                 normals_gen[i, :] = -normals_gen[i, :]
-                '''
 
         ###################################################################################################
         if opt.subnet > 1:
-            pointsRec2 = network(img, pointsRec,mode='deform2')
+            b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=1)
+            pointsRec2_parts = network(vol_part, pointsRec_parts, mode='deform2')
+            pointsRec2, _, CD_loss_part2, _, facesRec2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, faces_cuda_bn, False, level=1, scale=1.)
+
+            _, _, _, idx2_2 = distChamfer(points.float(), pointsRec2.float())  # PointsRec > Points
+
             pointsRec2_samples, index = samples_random(faces_cuda_bn, pointsRec2, opt.num_points)
-            error = network(img, pointsRec2_samples.detach().transpose(1, 2),mode='estimate2')
+            error = network(vol_part, pointsRec2_samples.detach().transpose(1, 2),mode='estimate2')
             faces_cuda_bn = faces_cuda_bn.clone()
-            faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau/opt.tau_decay, index, opt.pool)
+            # faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau/opt.tau_decay, index, opt.pool)
             triangles_c2 = faces_cuda_bn[0].cpu().data.numpy()
 
             pointsRec2 = torch.squeeze(pointsRec2)
+            normals_gen2 = torch.zeros(pointsRec2.shape).cuda()
             v10 = pointsRec2[triangles_c2[:, 1]] - pointsRec2[triangles_c2[:, 0]]
             v20 = pointsRec2[triangles_c2[:, 2]] - pointsRec2[triangles_c2[:, 0]]
-            normals_gen2 = torch.cross(v10, v20)
-            normals_gen2 = normals_gen2.cpu().data.numpy()
-            normals_gen2 = sklp.normalize(normals_gen2, axis=1)
+            normals_gen2_value = torch.cross(v10, v20)
+            normals_gen2[triangles_c2[:, 0]] += normals_gen2_value[:]
+            normals_gen2[triangles_c2[:, 1]] += normals_gen2_value[:]
+            normals_gen2[triangles_c2[:, 2]] += normals_gen2_value[:]
+            normals_gen2_len = torch.sqrt(
+                normals_gen2[:, 0] * normals_gen2[:, 0] + normals_gen2[:, 1] * normals_gen2[:, 1] + normals_gen2[:, 2] * normals_gen2[:, 2])
+            normals_gen2 = normals_gen2 / normals_gen2_len.reshape(-1, 1)
             pointsRec2 = torch.unsqueeze(pointsRec2, 0)
+
+            for i in range(0, normals_gen2.shape[0] - 1):
+                if torch.dot(normals_gen2[i, :].cpu().float(), normals[0, idx2_2[0, i], :].float()).item() < 0.0:
+                    normals_gen2[i, :] = -normals_gen2[i, :]
 
         ###################################################################################################
         if opt.subnet > 2:
@@ -294,10 +222,11 @@ with torch.no_grad():
         meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen.obj",
                                 pointsRec.cpu().data.squeeze().numpy(),
                                 triangles=faces, normals=normals_gen)
+        '''
         meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen_pruned.obj",
                                 pointsRec.cpu().data.squeeze().numpy(),
                                 triangles=triangles_c1, normals=normals_gen)
-
+                                '''
         '''
         write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_GT",
                   points=pd.DataFrame(points.cpu().data.squeeze().numpy()), as_text=True)
@@ -320,9 +249,11 @@ with torch.no_grad():
             meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2.obj",
                                     pointsRec2.cpu().data.squeeze().numpy(),
                                     triangles=triangles_c1, normals=normals_gen2)
+            '''
             meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2_pruned.obj",
                                     pointsRec2.cpu().data.squeeze().numpy(),
                                     triangles=triangles_c2, normals=normals_gen2)
+                                    '''
         if opt.subnet>2:
             write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen3",
                       points=pd.DataFrame(pointsRec3.cpu().data.squeeze().numpy()), as_text=True,

@@ -503,40 +503,52 @@ class SVR_TMNet_Split(nn.Module):
         self.refine = Refiner(bottleneck_size=3 + self.bottleneck_size)
 
     def forward(self,x,points,vector1=0,vector2=0,mode='deform1'):
-
+        '''
         x = x[:,:3,:,:].contiguous()
         x, _ = self.encoder(x)
-
+        '''
         outs = []
         if mode == 'deform1':
             for i in range(0, points.shape[0]):
+                x_part = x[i]
+                x_part = x_part[:,:3,:,:].contiguous()
+                x_part, _ = self.encoder(x_part)
                 if points[i].size(1) != 3:
                     points[i] = points[i].transpose(2, 1)
-                y = x.unsqueeze(2).expand(x.size(0), x.size(1), points[i].size(2)).contiguous()
+                y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points[i].size(2)).contiguous()
                 y = torch.cat((points[i], y), 1).contiguous()
                 res = self.decoder[0](y, points[i].shape[1])
                 # res = res + points[i].unsqueeze(dim=0)
                 outs.append(res.contiguous().transpose(2,1).contiguous())
         elif mode == 'deform2':
+            x_part = x[0]
+            x_part = x_part[:,:3,:,:].contiguous()
+            x_part, _ = self.encoder(x_part)
             for i in range(0, points.shape[0]):
                 if points[i].size(1) != 3:
                     points[i] = points[i].transpose(2, 1)
-                y = x.unsqueeze(2).expand(x.size(0), x.size(1), points[i].size(2)).contiguous()
+                y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points[i].size(2)).contiguous()
                 y = torch.cat((points[i], y), 1).contiguous()
                 res = self.decoder2[0](y, points[i].shape[1])
                 res = res + points[i]
                 outs.append(res.contiguous().transpose(2,1).contiguous())
         elif mode == 'estimate':
+            x_part = x[0]
+            x_part = x_part[:, :3, :, :].contiguous()
+            x_part, _ = self.encoder(x_part)
             if points.size(1) != 3:
                 points = points.transpose(2,1)
-            y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
+            y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points.size(2)).contiguous()
             y = torch.cat((points, y), 1).contiguous()
             outs = self.estimate(y)
             outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
         elif mode == 'estimate2':
+            x_part = x[0]
+            x_part = x_part[:, :3, :, :].contiguous()
+            x_part, _ = self.encoder(x_part)
             if points.size(1) != 3:
                 points = points.transpose(2,1)
-            y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
+            y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points.size(2)).contiguous()
             y = torch.cat((points, y), 1).contiguous()
             outs = self.estimate2(y)
             outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
@@ -549,7 +561,6 @@ class SVR_TMNet_Split(nn.Module):
             outs = None
         # return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
         return outs
-
 
 class Pretrain(nn.Module):
     def __init__(self,  bottleneck_size = 1024,num_points=2500):

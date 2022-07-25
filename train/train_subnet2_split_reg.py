@@ -44,7 +44,7 @@ opt = parser.parse_args()
 print(opt)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 sys.path.append("./extension/")
 import dist_chamfer as ext
@@ -107,7 +107,7 @@ lrate = opt.lr
 optimizer = optim.Adam([
     {'params':network.decoder2.parameters()},
     {'params':network.estimate2.parameters()}
-    ], lr = lrate )
+    ], lr = lrate, weight_decay=0.1)
 
 
 train_l2_loss = AverageValueMeter()
@@ -135,7 +135,7 @@ for epoch in range(opt.nepoch):
         optimizer = optim.Adam([
             {'params': network.decoder2.parameters()},
             {'params': network.estimate2.parameters()}
-        ], lr=lrate/10.0)
+        ], lr=lrate/10.0, weight_decay=0.1)
 
     for i, data in enumerate(dataloader, 0):
         optimizer.zero_grad()
@@ -160,17 +160,19 @@ for epoch in range(opt.nepoch):
         with torch.no_grad():
 
             b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part = split_mesh(points_choice, vertices_input, level=0)
-            pointsRec_parts = network(img, vertices_input_parts, mode='deform1')
-            pointsRec, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, True)
+            vol_part = split_volume(img, level=0)
+            pointsRec_parts = network(vol_part, vertices_input_parts, mode='deform1')
+            pointsRec, _, _, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, None, True, level=0)
 
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
-            error_stage1 = network(img, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
+            error_stage1 = network(vol_part, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
             faces_cuda_bn = faces_cuda.unsqueeze(0).expand(img.size(0), faces_cuda.size(0), faces_cuda.size(1))
-            faces_cuda_bn = prune(faces_cuda_bn.detach(), error_stage1.detach(), opt.tau, index, opt.pool)
+            # faces_cuda_bn = prune(faces_cuda_bn.detach(), error_stage1.detach(), opt.tau, index, opt.pool)
 
-        b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=0)
-        pointsRec2_parts = network(img, pointsRec_parts, mode='deform2')
-        pointsRec2, _, CD_loss_part2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, True)
+        b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=1)
+        vol_part = split_volume(img, level=0)
+        pointsRec2_parts = network(vol_part, pointsRec_parts, mode='deform2')
+        pointsRec2, _, CD_loss_part2, _, _ = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, faces_cuda_bn, False, level=1, scale=1.)
         _, _, _, idx2 = distChamfer(points, pointsRec2)
         _, _, _, idx2_choice = distChamfer(points_choice, pointsRec2)
 
@@ -178,16 +180,16 @@ for epoch in range(opt.nepoch):
         dist12_samples, dist22_samples, _, _ = distChamfer(points, pointsRec2_samples)
         choice2 = np.random.choice(points.size(1), opt.num_samples, replace=False)
         error_GT = torch.sqrt(dist22_samples.detach()[:,choice2])
-        error = network(img, pointsRec2_samples.detach()[:,choice2].transpose(1, 2), mode='estimate2')
+        error = network(vol_part, pointsRec2_samples.detach()[:,choice2].transpose(1, 2), mode='estimate2')
 
         pointsRec2 = torch.squeeze(pointsRec2)
         normals_gen = torch.zeros(pointsRec2.shape).cuda()
-        v10 = pointsRec2[faces_cuda[:, 1]] - pointsRec2[faces_cuda[:, 0]]
-        v20 = pointsRec2[faces_cuda[:, 2]] - pointsRec2[faces_cuda[:, 0]]
+        v10 = pointsRec2[faces_cuda_bn[:, :, 1]] - pointsRec2[faces_cuda_bn[:, :, 0]]
+        v20 = pointsRec2[faces_cuda_bn[:, :, 2]] - pointsRec2[faces_cuda_bn[:, :, 0]]
         normals_gen_value = torch.cross(v10, v20)
-        normals_gen[faces_cuda[:,0]] += normals_gen_value[:]
-        normals_gen[faces_cuda[:,1]] += normals_gen_value[:]
-        normals_gen[faces_cuda[:,2]] += normals_gen_value[:]
+        normals_gen[faces_cuda_bn[:, :, 0]] += normals_gen_value[:]
+        normals_gen[faces_cuda_bn[:, :, 1]] += normals_gen_value[:]
+        normals_gen[faces_cuda_bn[:, :, 2]] += normals_gen_value[:]
         normals_gen_len = torch.sqrt(normals_gen[:,0]*normals_gen[:,0]+normals_gen[:,1]*normals_gen[:,1]+normals_gen[:,2]*normals_gen[:,2])
         normals_gen = normals_gen / normals_gen_len.reshape(-1, 1)
         pointsRec2 = torch.unsqueeze(pointsRec2, 0)
@@ -203,8 +205,8 @@ for epoch in range(opt.nepoch):
         # uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec2.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
         # uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(), b_v_list_gen, b_v_list_gt)
 
-        loss_net = cds_stage2 + CD_loss_part2 + opt.lambda_normal * normal_loss + opt.lambda_edge * edge_loss + \
-                   l2_loss # + opt.lambda_smooth * smoothness_loss + opt.lambda_uniform_glob * uniform_loss_global * uniform_loss_local
+        loss_net = cds_stage2 + CD_loss_part2 + opt.lambda_normal * normal_loss + opt.lambda_edge * edge_loss
+                   # l2_loss + opt.lambda_smooth * smoothness_loss + opt.lambda_uniform_glob * uniform_loss_global * uniform_loss_local
 
         loss_net.backward()
         train_CDs_stage2_loss.update(cds_stage2.item())
@@ -229,8 +231,8 @@ for epoch in range(opt.nepoch):
                         ),
                         )
         print(
-            '[%d: %d/%d] train_cd_loss:  %f , l2_loss: %f, edge_loss: %f, normal_loss: %f, loss_net: %f'
-            % (epoch, i, len(dataset) / opt.batchSize, cds_stage2.item(), l2_loss.item(), edge_loss.item(),
+            '[%d: %d/%d] train_cd_loss:  %f, CD_loss_part:  %f, l2_loss: %f, edge_loss: %f, normal_loss: %f, loss_net: %f'
+            % (epoch, i, len(dataset) / opt.batchSize, cds_stage2.item(), CD_loss_part2.item(), l2_loss.item(), edge_loss.item(),
                normal_loss.item(), loss_net.item()))
 
     train_l2_curve.append(train_l2_loss.avg)
@@ -262,33 +264,35 @@ for epoch in range(opt.nepoch):
                                                      vertices_sphere.size(2)).contiguous())
 
             b_f_list_gt, points_choice_parts, b_f_list_gen, vertices_input_parts, range_part = split_mesh(points_choice, vertices_input, level=0)
-            pointsRec_parts = network(img, vertices_input_parts, mode='deform1')
-            pointsRec, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, True)
+            vol_part = split_volume(img, level=0)
+            pointsRec_parts = network(vol_part, vertices_input_parts, mode='deform1')
+            pointsRec, _, _, _, _ = combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, range_part, b_f_list_gen, None, True, level=0)
 
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
-            error = network(img, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
+            error = network(vol_part, pointsRec_samples.detach().transpose(1, 2), mode='estimate')
             faces_cuda_bn = faces_cuda.unsqueeze(0).expand(img.size(0), faces_cuda.size(0), faces_cuda.size(1))
-            faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau, index, opt.pool)
+            # faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau, index, opt.pool)
 
-            b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=0)
-            pointsRec2_parts = network(img, pointsRec_parts, mode='deform2')
-            pointsRec2, _, CD_loss_part2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, True)
+            b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=1)
+            vol_part = split_volume(img, level=0)
+            pointsRec2_parts = network(vol_part, pointsRec_parts, mode='deform2')
+            pointsRec2, _, CD_loss_part2, _, _ = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, faces_cuda_bn, False, level=1, scale=1.)
             _, _, _, idx2 = distChamfer(points, pointsRec2)
             _, _, _, idx2_choice = distChamfer(points_choice, pointsRec2)
 
             pointsRec2_samples, index = samples_random(faces_cuda_bn, pointsRec2, opt.num_points)
             dist12_samples, dist22_samples, _, _ = distChamfer(points, pointsRec2_samples)
             error_GT = torch.sqrt(dist22_samples.detach())
-            error = network(img, pointsRec2_samples.detach().transpose(1, 2), mode='estimate2')
+            error = network(vol_part, pointsRec2_samples.detach().transpose(1, 2), mode='estimate2')
 
             pointsRec = torch.squeeze(pointsRec)
             normals_gen = torch.ones(pointsRec.shape).cuda()
-            v10 = pointsRec[faces_cuda[:, 1]] - pointsRec[faces_cuda[:, 0]]
-            v20 = pointsRec[faces_cuda[:, 2]] - pointsRec[faces_cuda[:, 0]]
+            v10 = pointsRec[faces_cuda_bn[:, :, 1]] - pointsRec[faces_cuda_bn[:, :, 0]]
+            v20 = pointsRec[faces_cuda_bn[:, :, 2]] - pointsRec[faces_cuda_bn[:, :, 0]]
             normals_gen_value = torch.cross(v10, v20)
-            normals_gen[faces_cuda[:, 0]] += normals_gen_value[:]
-            normals_gen[faces_cuda[:, 1]] += normals_gen_value[:]
-            normals_gen[faces_cuda[:, 2]] += normals_gen_value[:]
+            normals_gen[faces_cuda_bn[:, :, 0]] += normals_gen_value[:]
+            normals_gen[faces_cuda_bn[:, :, 1]] += normals_gen_value[:]
+            normals_gen[faces_cuda_bn[:, :, 2]] += normals_gen_value[:]
             normals_gen_len = torch.sqrt(normals_gen[:, 0] * normals_gen[:, 0] + \
                                          normals_gen[:, 1] * normals_gen[:, 1] + \
                                          normals_gen[:,2] * normals_gen[:, 2])
@@ -306,8 +310,8 @@ for epoch in range(opt.nepoch):
             # uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec2.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
             # uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(),b_v_list_gen, b_v_list_gt)
 
-            loss_net = cds_stage2 + opt.lambda_normal * normal_loss + opt.lambda_edge * edge_loss + \
-                  l2_loss # +  opt.lambda_smooth * smoothness_loss + opt.lambda_uniform_glob * uniform_loss_global * uniform_loss_local
+            loss_net = cds_stage2 + CD_loss_part2 + opt.lambda_normal * normal_loss + opt.lambda_edge * edge_loss
+                  # l2_loss +  opt.lambda_smooth * smoothness_loss + opt.lambda_uniform_glob * uniform_loss_global * uniform_loss_local
 
             val_CDs_stage2_loss.update(cds_stage2.item())
             val_l2_loss.update(l2_loss.item())
@@ -331,8 +335,8 @@ for epoch in range(opt.nepoch):
                             )
 
             print(
-                '[%d: %d/%d] val_cd_loss:  %f , l2_loss: %f, edge_loss: %f, normal_loss: %f, loss_net: %f'
-                % (epoch, i, len(dataset_test) / opt.batchSize, cds_stage2.item(), l2_loss.item(), edge_loss.item(),
+                '[%d: %d/%d] val_cd_loss:  %f, CD_loss_part:  %f, l2_loss: %f, edge_loss: %f, normal_loss: %f, loss_net: %f'
+                % (epoch, i, len(dataset_test) / opt.batchSize, cds_stage2.item(), CD_loss_part2.item(), l2_loss.item(), edge_loss.item(),
                    normal_loss.item(), loss_net.item()))
 
         val_l2_curve.append(val_l2_loss.avg)

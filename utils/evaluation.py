@@ -16,10 +16,10 @@ f1_score_avg = 0.0
 mesh_num = 0
 
 for i in range (34, 58):
-    gen_mesh_str = './data/evaluate/m_' + str(i).zfill(7) + '_gen.obj'
-    gt_mesh_str = './data/evaluate/m_' + str(i).zfill(7) + '_norm.obj'
-    gen_mesh_vox_str = './data/evaluate/m_' + str(i).zfill(7) + '_gen.binvox'
-    gt_mesh_vox_str = './data/evaluate/m_' + str(i).zfill(7) + '_norm.binvox'
+    gen_mesh_str = './data/evaluate2/m_' + str(i).zfill(7) + '_gen2.obj'
+    gt_mesh_str = './data/evaluate2/m_' + str(i).zfill(7) + '_norm.obj'
+    gen_mesh_vox_str = './data/evaluate2/m_' + str(i).zfill(7) + '_gen2.binvox'
+    gt_mesh_vox_str = './data/evaluate2/m_' + str(i).zfill(7) + '_norm.binvox'
 
     if os.path.isfile(gen_mesh_str) and os.path.isfile(gt_mesh_str) and \
             os.path.isfile(gen_mesh_vox_str) and os.path.isfile(gt_mesh_vox_str):
