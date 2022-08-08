@@ -6,8 +6,8 @@ import torch
 import torch.optim as optim
 import sys
 sys.path.append('./auxiliary/')
-from dataset import *
-from model import *
+from dataset_3D import *
+from model_3D import *
 from utils import *
 from ply import *
 import os
@@ -18,15 +18,15 @@ import scipy.io as sio
 from loss import *
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--batchSize', type=int, default=3, help='input batch size')
+parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=12)
 parser.add_argument('--nepoch', type=int, default=120, help='number of epochs to train for')
 parser.add_argument('--epoch_decay',type=int,default=100,help='epoch to decay lr')
-parser.add_argument('--model', type=str,default='./log/SVR_subnet2/network.pth',help='model path from the trained subnet2')
+parser.add_argument('--model', type=str,default='./log/SVR_subnet2_3/network.pth',help='model path from the trained subnet2')
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud')
 parser.add_argument('--num_vertices', type=int, default=2562)
 parser.add_argument('--env', type=str, default="SVR_subnet3", help='visdom env')
-parser.add_argument('--lr', type=float, default=0.001)
+parser.add_argument('--lr', type=float, default=1e-7)
 parser.add_argument('--tau', type=float, default=0.1)
 parser.add_argument('--tau_decay', type=float, default=2.0)
 parser.add_argument('--lambda_boundary', type=float, default=0.5)
@@ -41,7 +41,7 @@ import dist_chamfer as ext
 distChamfer = ext.chamferDist()
 
 server = 'http://localhost/'
-vis = visdom.Visdom(server=server, port=8886, env=opt.env, use_incoming_socket=False)
+vis = visdom.Visdom(server=server, port=8887, env=opt.env, use_incoming_socket=False)
 now = datetime.datetime.now()
 save_path = opt.env
 dir_name = os.path.join('./log', save_path)
@@ -52,6 +52,9 @@ blue = lambda x: '\033[94m' + x + '\033[0m'
 print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 
 dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=True,train=True,class_choice='lumbar_vertebra_05')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
@@ -85,7 +88,7 @@ print(network)
 network.cuda()
 
 lrate = opt.lr
-optimizer = optim.Adam(network.refine.parameters(), lr=lrate)
+optimizer = optim.Adam(network.refine.parameters(), lr=lrate, weight_decay=0.05)
 
 train_CDs_stage3_loss = AverageValueMeter()
 val_CDs_stage3_loss = AverageValueMeter()
@@ -115,17 +118,25 @@ for epoch in range(opt.nepoch):
     network.refine.train()
 
     if epoch == opt.epoch_decay:
-        optimizer = optim.Adam(network.refine.parameters(), lr=lrate / 10.0)
+        optimizer = optim.Adam(network.refine.parameters(), lr=lrate / 10.0, weight_decay=0.05)
 
     for i, data in enumerate(dataloader, 0):
         optimizer.zero_grad()
-        img, points, normals, name, cat = data
+        img, points, normals, faces_gt, points_orig, name, cat = data
         img = img.cuda()
+        img = img.unsqueeze(dim=0)
+        img = img.float()
+
         points = points.cuda()
         normals = normals.cuda()
+        faces_gt = torch.squeeze(faces_gt)
+        faces_gt_cuda = faces_gt.cuda()
+        edge_cuda_gt = get_edges(faces_gt.numpy())
         points = points.float()
+        normals = normals.float()
         choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
         points_choice = points[:, choice, :].contiguous()
+        normals_choice = normals[:, choice, :].contiguous()
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                  vertices_sphere.size(2)).contiguous())
 
@@ -203,7 +214,7 @@ for epoch in range(opt.nepoch):
 
         # VIZUALIZE
         if i % 50 <= 0:
-            vis.image(img[0].data.cpu().contiguous(), win='INPUT IMAGE TRAIN', opts=dict(title="INPUT IMAGE TRAIN"))
+            vis.image(img[0, :, 112, :].data.cpu().contiguous(), win='INPUT IMAGE TRAIN', opts=dict(title="INPUT IMAGE TRAIN"))
             vis.scatter(X=points_choice[0].data.cpu(),
                         win='TRAIN_INPUT',
                         opts=dict(
@@ -235,15 +246,24 @@ for epoch in range(opt.nepoch):
 
         network.eval()
         for i, data in enumerate(dataloader_test, 0):
-            img, points, normals, name, cat = data
+            img, points, normals, faces_gt, points_orig, name, cat = data
             img = img.cuda()
+            img = img.unsqueeze(dim=0)
+            img = img.float()
+
             points = points.cuda()
             normals = normals.cuda()
+            faces_gt = torch.squeeze(faces_gt)
+            faces_gt_cuda = faces_gt.cuda()
+            edge_cuda_gt = get_edges(faces_gt.numpy())
             points = points.float()
+            normals = normals.float()
             choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
             points_choice = points[:, choice, :].contiguous()
+            normals_choice = normals[:, choice, :].contiguous()
             vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
                                                      vertices_sphere.size(2)).contiguous())
+
             pointsRec = network(img, vertices_input,mode='deform1')  # vertices_sphere 3*2562
             pointsRec_samples, index = samples_random(faces_cuda, pointsRec.detach(), opt.num_points)
             error = network(img, pointsRec_samples.detach().transpose(1, 2),mode='estimate')
@@ -316,7 +336,7 @@ for epoch in range(opt.nepoch):
             dataset_test.perCatValueMeter[cat[0]].update(cds_stage3.item())
 
             if i % 25 == 0:
-                vis.image(img[0].data.cpu().contiguous(), win='INPUT IMAGE VAL', opts=dict(title="INPUT IMAGE TRAIN"))
+                vis.image(img[0, :, 112, :].data.cpu().contiguous(), win='INPUT IMAGE VAL', opts=dict(title="INPUT IMAGE TRAIN"))
                 vis.scatter(X=points_choice[0].data.cpu(),
                             win='VAL_INPUT',
                             opts=dict(

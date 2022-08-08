@@ -1,29 +1,37 @@
-"""
-.. _mesh_quality_example:
+import numpy as np
+import open3d as o3d
+import copy
 
-Computing Mesh Quality
-~~~~~~~~~~~~~~~~~~~~~~
 
-Leverage powerful VTK algorithms for computing mesh quality.
+'''
+knot_mesh = o3d.data.KnotMesh()
+mesh = o3d.io.read_triangle_mesh(knot_mesh.path)
+mesh.compute_vertex_normals()
+mesh1 = copy.deepcopy(mesh)
+mesh1.triangles = o3d.utility.Vector3iVector(
+    np.asarray(mesh1.triangles)[:len(mesh1.triangles) // 2, :])
+mesh1.triangle_normals = o3d.utility.Vector3dVector(
+    np.asarray(mesh1.triangle_normals)[:len(mesh1.triangle_normals) // 2, :])
+o3d.io.write_triangle_mesh("knot.obj", mesh)
+o3d.io.write_triangle_mesh("knot_part.obj", mesh1)
+'''
 
-Here we will use the :func:`pyvista.DataSetFilters.compute_cell_quality` filter
-to compute the cell qualities. For a full list of the various quality metrics
-available, please refer to the documentation for that filter.
-"""
-from pyvista import examples
+'''
+mesh = o3d.io.read_triangle_mesh("cube.obj")
+# mesh = o3d.geometry.TriangleMesh.create_box()
+# mesh.compute_vertex_normals()
+mesh_div_itr1 = mesh.subdivide_midpoint(number_of_iterations=1)
+# o3d.io.write_triangle_mesh("cube_o3d.obj", mesh)
+o3d.io.write_triangle_mesh("cube_div_itr1_o3d.obj", mesh_div_itr1)
+'''
+'''
+knot_mesh = o3d.data.KnotMesh()
+mesh = o3d.io.read_triangle_mesh(knot_mesh.path)
+# print(np.asarray(mesh.vertices).shape)
+mesh_div_itr4 = mesh.subdivide_midpoint(number_of_iterations=4)
+mesh_simp = mesh.simplify_quadric_decimation(720)
+o3d.io.write_triangle_mesh("knot_o3d.obj", mesh)
+o3d.io.write_triangle_mesh("knot_div_itr4_o3d.obj", mesh_div_itr4)
+o3d.io.write_triangle_mesh("knot_sim_720_o3d.obj", mesh_simp)
+'''
 
-mesh = examples.download_cow().triangulate().decimate(0.7)
-
-cpos = [
-    (10.10963531890468, 4.61130688407898, -4.503884867626516),
-    (1.2896420468715433, -0.055387528972708225, 1.1228250502811408),
-    (-0.2970769821136617, 0.9100381451936025, 0.2890948650371137),
-]
-
-###############################################################################
-# Compute the cell quality. Note that there are many different quality measures
-qual = mesh.compute_cell_quality(quality_measure='scaled_jacobian')
-print(qual)
-
-###############################################################################
-# qual.plot(cpos=cpos, scalars='CellQuality')

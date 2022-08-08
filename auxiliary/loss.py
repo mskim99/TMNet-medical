@@ -82,12 +82,15 @@ def get_normal_loss(vertices, faces, gt_normals, idx2):
 def get_normal_loss_mdf(gen_normals, gt_normals, idx2):
 
     normal_loss = 0.0
+    num_valid = 0
     for i in range(0, gen_normals.shape[0]):
         diff = gen_normals[i, :] - gt_normals[0, idx2[0, i], :]
         diff = torch.sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2])
-        normal_loss = normal_loss + diff
+        if not torch.isnan(diff):
+            normal_loss = normal_loss + diff
+            num_valid = num_valid + 1
 
-    normal_loss = normal_loss / gen_normals.shape[0]
+    normal_loss = normal_loss / num_valid
     return normal_loss
 
 

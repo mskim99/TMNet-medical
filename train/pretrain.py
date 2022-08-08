@@ -57,7 +57,7 @@ random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=False, train=True, class_choice='lumbar_vertebra_05')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
@@ -124,10 +124,6 @@ for epoch in range(opt.nepoch):
         img = img.unsqueeze(dim=0)
         img = img.float()
 
-        vol_noize = torch.randn([1, 1, 256, 256, 256])
-        vol_noize = vol_noize.cuda()
-        img = 0.95 * img + 0.05 * vol_noize
-
         points = points.transpose(2, 1).contiguous()
         points = points.cuda()
         # SUPER_RESOLUTION optionally reduce the size of the points fed to PointNet
@@ -153,6 +149,7 @@ for epoch in range(opt.nepoch):
         pointsRec_max = torch.max(pointsRec, axis=1).values
         pointsRec_min = torch.min(pointsRec, axis=1).values
         pointsRec = (pointsRec - pointsRec_min) / (pointsRec_max - pointsRec_min + 1e-4)
+        pointsRec = pointsRec * 2. - 1.
 
         p = points.transpose(2, 1).contiguous().detach().cpu().numpy()
         pr = pointsRec.detach().cpu().numpy()
@@ -229,6 +226,7 @@ for epoch in range(opt.nepoch):
             pointsRec_max = torch.max(pointsRec, axis=1).values
             pointsRec_min = torch.min(pointsRec, axis=1).values
             pointsRec = (pointsRec - pointsRec_min) / (pointsRec_max - pointsRec_min + 1e-4)
+            pointsRec = pointsRec * 2. - 1.
 
             dist1, dist2, idx1, idx2 = distChamfer(points.transpose(2, 1).contiguous(), pointsRec)
 

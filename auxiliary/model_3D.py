@@ -386,11 +386,11 @@ class Refiner(nn.Module):
 
     def forward(self, x):
         x = F.relu(self.bn1(self.conv1(x)))
-        x = self.dropout1(x)
+        # x = self.dropout1(x)
         x = F.relu(self.bn2(self.conv2(x)))
-        x = self.dropout2(x)
+        # x = self.dropout2(x)
         x = F.relu(self.bn3(self.conv3(x)))
-        x = self.dropout3(x)
+        # x = self.dropout3(x)
         x = self.th(self.conv4(x))
         return x
 
@@ -454,43 +454,6 @@ class SVR_TMNet(nn.Module):
         return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
 
 
-class SVR_TMNet(nn.Module):
-    def __init__(self,  bottleneck_size = 1024):
-        super(SVR_TMNet, self).__init__()
-        self.bottleneck_size = bottleneck_size
-        self.encoder = resnet_3D.resnet34_3D(num_classes=self.bottleneck_size)
-        self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
-        self.decoder2 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
-        self.estimate = Estimator(bottleneck_size=3 + self.bottleneck_size)
-        self.estimate2 = Estimator(bottleneck_size=3+self.bottleneck_size)
-        self.refine = Refiner(bottleneck_size=3 + self.bottleneck_size)
-
-    def forward(self,x,points,vector1=0,vector2=0,mode='deform1'):
-        x = x[:,:3,:,:].contiguous()
-        x, _ = self.encoder(x)
-        if points.size(1) != 3:
-            points = points.transpose(2,1)
-        y = x.unsqueeze(2).expand(x.size(0), x.size(1), points.size(2)).contiguous()
-        y = torch.cat((points, y), 1).contiguous()
-        if mode == 'deform1':
-            outs = self.decoder[0](y, 0)
-        elif mode == 'deform2':
-            outs = self.decoder2[0](y, 0)
-            outs = outs + points
-        elif mode == 'estimate':
-            outs = self.estimate(y)
-        elif mode == 'estimate2':
-            outs = self.estimate2(y)
-        elif mode == 'refine':
-            outs = self.refine(y)
-            outs1 = outs[:, 0].unsqueeze(1)
-            outs2 = outs[:, 1].unsqueeze(1)
-            outs = outs1 * vector1 + outs2 * vector2 + points
-        else:
-            outs = None
-        return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
-
-
 class SVR_TMNet_Split(nn.Module):
     def __init__(self,  bottleneck_size = 1024):
         super(SVR_TMNet_Split, self).__init__()
@@ -498,8 +461,10 @@ class SVR_TMNet_Split(nn.Module):
         self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
         self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.decoder2 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
+        self.decoder3 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.estimate = Estimator(bottleneck_size=3 + self.bottleneck_size)
         self.estimate2 = Estimator(bottleneck_size=3+self.bottleneck_size)
+        self.estimate3 = Estimator(bottleneck_size=3+self.bottleneck_size)
         self.refine = Refiner(bottleneck_size=3 + self.bottleneck_size)
 
     def forward(self,x,points,vector1=0,vector2=0,mode='deform1'):
@@ -532,6 +497,18 @@ class SVR_TMNet_Split(nn.Module):
                 res = self.decoder2[0](y, points[i].shape[1])
                 res = res + points[i]
                 outs.append(res.contiguous().transpose(2,1).contiguous())
+        elif mode == 'deform3':
+            x_part = x[0]
+            x_part = x_part[:,:3,:,:].contiguous()
+            x_part, _ = self.encoder(x_part)
+            for i in range(0, points.shape[0]):
+                if points[i].size(1) != 3:
+                    points[i] = points[i].transpose(2, 1)
+                y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points[i].size(2)).contiguous()
+                y = torch.cat((points[i], y), 1).contiguous()
+                res = self.decoder3[0](y, points[i].shape[1])
+                res = 0.1 * res + points[i]
+                outs.append(res.contiguous().transpose(2,1).contiguous())
         elif mode == 'estimate':
             x_part = x[0]
             x_part = x_part[:, :3, :, :].contiguous()
@@ -551,6 +528,16 @@ class SVR_TMNet_Split(nn.Module):
             y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points.size(2)).contiguous()
             y = torch.cat((points, y), 1).contiguous()
             outs = self.estimate2(y)
+            outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+        elif mode == 'estimate3':
+            x_part = x[0]
+            x_part = x_part[:, :3, :, :].contiguous()
+            x_part, _ = self.encoder(x_part)
+            if points.size(1) != 3:
+                points = points.transpose(2,1)
+            y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points.size(2)).contiguous()
+            y = torch.cat((points, y), 1).contiguous()
+            outs = self.estimate3(y)
             outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
         elif mode == 'refine':
             outs = self.refine(y)
@@ -573,7 +560,7 @@ class Pretrain(nn.Module):
         nn.BatchNorm1d(self.bottleneck_size),
         nn.ReLU()
         )
-        self.encoder = resnet_3D.resnet34_3D(num_classes=self.bottleneck_size)
+        self.encoder = resnet_3D.resnet50_3D(num_classes=self.bottleneck_size)
         self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
 
     def forward(self, x, mode='point'):

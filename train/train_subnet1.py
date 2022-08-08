@@ -24,11 +24,11 @@ parser.add_argument('--workers', type=int, help='number of data loading workers'
 parser.add_argument('--nepoch', type=int, default=420, help='number of epochs to train for') # 120
 parser.add_argument('--epoch_decay', type=int, default=300, help='epoch to decay lr')
 parser.add_argument('--epoch_decay2', type=int, default=400, help='epoch to decay lr for the second time')
-parser.add_argument('--model', type=str, default='', help='model path from the pretrained model')
+parser.add_argument('--model', type=str, default='./log/SVR_subnet1_usage/network.pth', help='model path from the pretrained model')
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud') # 10000
 parser.add_argument('--num_vertices', type=int, default=2562, help='number of vertices of the initial sphere')
 parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation') # 2500
-parser.add_argument('--env', type=str, default="SVR_subnet1_3", help='visdom env')
+parser.add_argument('--env', type=str, default="SVR_subnet1_1", help='visdom env')
 parser.add_argument('--lr', type=float, default=1e-5, help='initial learning rate')
 parser.add_argument('--tau', type=float, default=0.1, help='threshold to prune the faces')
 parser.add_argument('--lambda_edge', type=float, default=1e-5, help='weight of edge loss') # 0.05
@@ -45,7 +45,7 @@ import dist_chamfer as ext
 distChamfer = ext.chamferDist()
 
 server = 'http://localhost/'
-vis = visdom.Visdom(server=server, port=8887, env=opt.env, use_incoming_socket=False)
+vis = visdom.Visdom(server=server, port=8886, env=opt.env, use_incoming_socket=False)
 now = datetime.datetime.now()
 save_path = opt.env
 dir_name = os.path.join('./log', save_path)

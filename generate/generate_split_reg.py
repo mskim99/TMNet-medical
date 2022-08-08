@@ -34,8 +34,10 @@ parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"] = '3'
+
+torch.cuda.set_device(3)
 
 sys.path.append("./extension/")
 import dist_chamfer as ext
@@ -91,6 +93,7 @@ with torch.no_grad():
         points = points.cuda()
         choice = np.random.choice(points.size(1), opt.num_vertices, replace=False)
         points_choice = points[:, choice, :].contiguous()
+        normals_choice = normals[:, choice, :].contiguous()
         points = points.float()
         points_choice = points_choice.float()
         vertices_input = (vertices_sphere.expand(img.size(0), vertices_sphere.size(1),
@@ -121,15 +124,21 @@ with torch.no_grad():
         normals_gen = normals_gen / normals_gen_len.reshape(-1, 1)
         pointsRec = torch.unsqueeze(pointsRec, 0)
 
-        for i in range(0, normals_gen.shape[0] - 1):
-            if torch.dot(normals_gen[i, :].cpu().float(), normals[0, idx2[0, i], :].float()).item() < 0.0:
-                normals_gen[i, :] = -normals_gen[i, :]
+        '''
+        for j in range(0, normals_gen.shape[0] - 1):
+            if torch.dot(normals_gen[j, :].cpu().float(), normals[0, idx2[0, j], :].float()).item() < 0.0:
+                normals_gen[j, :] = -normals_gen[j, :]
+                '''
 
         ###################################################################################################
         if opt.subnet > 1:
-            b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=1)
+            b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=0)
             pointsRec2_parts = network(vol_part, pointsRec_parts, mode='deform2')
-            pointsRec2, _, CD_loss_part2, _, facesRec2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, faces_cuda_bn, False, level=1, scale=1.)
+
+            # if i == 0:
+                # combine_meshes_simp_dec(pointsRec2_parts, points_choice_parts2, b_f_list_gen2, faces_cuda_bn)
+
+            pointsRec2, _, CD_loss_part2, _, facesRec2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, faces_cuda_bn, False, level=0, scale=1.)
 
             _, _, _, idx2_2 = distChamfer(points.float(), pointsRec2.float())  # PointsRec > Points
 
@@ -151,11 +160,11 @@ with torch.no_grad():
                 normals_gen2[:, 0] * normals_gen2[:, 0] + normals_gen2[:, 1] * normals_gen2[:, 1] + normals_gen2[:, 2] * normals_gen2[:, 2])
             normals_gen2 = normals_gen2 / normals_gen2_len.reshape(-1, 1)
             pointsRec2 = torch.unsqueeze(pointsRec2, 0)
-
-            for i in range(0, normals_gen2.shape[0] - 1):
-                if torch.dot(normals_gen2[i, :].cpu().float(), normals[0, idx2_2[0, i], :].float()).item() < 0.0:
-                    normals_gen2[i, :] = -normals_gen2[i, :]
-
+            '''
+            for j in range(0, normals_gen2.shape[0] - 1):
+                if torch.dot(normals_gen2[j, :].cpu().float(), normals[0, idx2_2[0, j], :].float()).item() < 0.0:
+                    normals_gen2[j, :] = -normals_gen2[j, :]
+                    '''
         ###################################################################################################
         if opt.subnet > 2:
             indices = (torch.arange(0, faces_cuda_bn.size(0)) * (1 + faces_cuda_bn.size(0)))\
@@ -221,7 +230,7 @@ with torch.no_grad():
                                 points.cpu().data.squeeze().numpy(), triangles=faces_gt.cpu().data.squeeze().numpy().astype(int))
         meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen.obj",
                                 pointsRec.cpu().data.squeeze().numpy(),
-                                triangles=faces, normals=normals_gen)
+                                triangles=faces, normals=normals_gen.cpu().numpy())
         '''
         meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen_pruned.obj",
                                 pointsRec.cpu().data.squeeze().numpy(),
@@ -248,7 +257,7 @@ with torch.no_grad():
                       '''
             meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2.obj",
                                     pointsRec2.cpu().data.squeeze().numpy(),
-                                    triangles=triangles_c1, normals=normals_gen2)
+                                    triangles=triangles_c1, normals=normals_gen2.cpu().numpy())
             '''
             meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2_pruned.obj",
                                     pointsRec2.cpu().data.squeeze().numpy(),

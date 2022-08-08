@@ -2,7 +2,10 @@ import torch
 import numpy as np
 import sys
 
+import open3d as o3d
 import cv2
+
+import copy
 
 sys.path.append('./extension/')
 import dist_chamfer as ext
@@ -103,7 +106,7 @@ def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, r
     v_idx_recon = torch.tensor([])
     pointsRec = pointsRec.cuda()
 
-    for b_v_idx in range(0, vertices_input_parts.shape[0]):
+    for b_v_idx in range(0, 8 ** level):
 
         if norm is True:
             b_v_r_min = torch.tensor([range_part[b_v_idx][0], range_part[b_v_idx][2], range_part[b_v_idx][4]])
@@ -141,15 +144,104 @@ def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, r
             v_idx_recon = torch.concat([v_idx_recon, b_f_list_gen[b_v_idx]], dim=0)
             points_orig_recon = torch.concat([points_orig_recon, points_choice_parts[b_v_idx]], dim=1)
 
-    CD_loss_part = CD_loss_part / float(vertices_input_parts.shape[0])
+    CD_loss_part = CD_loss_part / float(8 ** level)
 
     v_idx_recon = v_idx_recon.cuda()
     faces_recon = None
 
-    if vertices_input_parts.shape[0] > 1:
+    if level > 0:
         pointsRec_recon = torch.empty_like(pointsRec)
         pointsRec_recon[:, v_idx_recon, :] = pointsRec
     else:
         pointsRec_recon = pointsRec
 
     return pointsRec_recon, points_orig_recon, CD_loss_part, v_idx_recon, faces_recon
+
+
+def combine_meshes_simp_dec(mesh_vertices, mesh_vertices_combine, mesh_vertices_gt, mesh_faces_part, mesh_triangles):
+
+    mesh_recon = o3d.geometry.TriangleMesh()
+    mesh_recon_proc = o3d.geometry.TriangleMesh()
+    orig_mesh_tri = mesh_triangles.squeeze().cpu().numpy()
+    boundary_mesh_tri = mesh_triangles.squeeze().cpu().numpy()
+
+    mesh_parts = []
+    for i in range(0, len(mesh_vertices)):
+        mesh_part = o3d.geometry.TriangleMesh()
+        mv = mesh_vertices[i].detach().cpu().numpy().reshape(-1, 3)
+        mesh_part.vertices = o3d.utility.Vector3dVector(np.asarray(mv))
+
+        triangle_part = []
+        triangle_isin = np.isin(orig_mesh_tri, mesh_faces_part[i])
+        for j in range(0, triangle_isin.shape[0]):
+            if all(triangle_isin[j, :]):
+
+                # Add triangle part
+                idx0 = np.where(mesh_faces_part[i] == orig_mesh_tri[j, 0])
+                idx1 = np.where(mesh_faces_part[i] == orig_mesh_tri[j, 1])
+                idx2 = np.where(mesh_faces_part[i] == orig_mesh_tri[j, 2])
+                triangle_part.append(np.array([idx0[0], idx1[0], idx2[0]]))
+
+                b_idx_pos = np.where((boundary_mesh_tri == orig_mesh_tri[j, :]).all(axis=1))
+                boundary_mesh_tri = np.delete(boundary_mesh_tri, b_idx_pos[0], axis=0)
+
+        mesh_part.triangles = o3d.utility.Vector3iVector(np.asarray(triangle_part))
+        mesh_part.compute_triangle_normals()
+
+        '''
+        if i == 0:
+            mesh_recon = copy.deepcopy(mesh_part)
+        else:
+            mesh_recon += copy.deepcopy(mesh_part)
+            '''
+
+        mesh_parts.append(mesh_part)
+
+        # o3d.io.write_triangle_mesh("mesh_part" + str(i) +".obj", mesh_part)
+
+    mesh_boundary = o3d.geometry.TriangleMesh()
+    mesh_boundary.vertices = o3d.utility.Vector3dVector(mesh_vertices_combine.detach().cpu().numpy().reshape(-1, 3))
+    mesh_boundary.triangles = o3d.utility.Vector3iVector(boundary_mesh_tri)
+    mesh_boundary.compute_triangle_normals()
+    # o3d.io.write_triangle_mesh("mesh_boundary.obj", mesh_boundary)
+
+    '''
+    mesh_recon += copy.deepcopy(mesh_boundary)
+    mesh_recon = mesh_recon.remove_duplicated_triangles()
+    mesh_recon = mesh_recon.remove_non_manifold_edges()
+    mesh_recon = mesh_recon.remove_degenerate_triangles()
+    '''
+
+    # Simplification, Subdivision
+    CD_loss_part = 0.0
+    for i in range(0, len(mesh_parts)):
+        g_vt_num = np.asarray(mesh_parts[i].vertices).shape[0]
+        gt_vt_num = mesh_vertices_gt[i].shape[1]
+
+        # Simplification
+        if g_vt_num < gt_vt_num / 2:
+            mesh_parts[i] = mesh_parts[i].subdivide_midpoint(number_of_iterations=1)
+        elif g_vt_num > gt_vt_num * 2:
+            mesh_parts[i] = mesh_parts[i].simplify_quadric_decimation(int(np.asarray(mesh_parts[i].triangles).shape[0] / 2))
+
+        if i == 0:
+            mesh_recon_proc = copy.deepcopy(mesh_parts[i])
+        else:
+            mesh_recon_proc += copy.deepcopy(mesh_parts[i])
+
+        gen_v_tensor = torch.tensor(np.asarray(mesh_parts[i].vertices)).unsqueeze(0).cuda().float()
+        gt_v_tensor = torch.tensor(mesh_vertices_gt[i]).cuda().float()
+
+        dist1_p, dist2_p, _, _ = distChamfer(gen_v_tensor, gt_v_tensor)
+        CD_loss_part_bv = torch.mean(dist1_p) + torch.mean(dist2_p)
+        CD_loss_part = CD_loss_part + CD_loss_part_bv
+
+    mesh_recon_proc += copy.deepcopy(mesh_boundary)
+    mesh_recon_proc = mesh_recon_proc.remove_duplicated_triangles()
+    mesh_recon_proc = mesh_recon_proc.remove_non_manifold_edges()
+    mesh_recon_proc = mesh_recon_proc.remove_degenerate_triangles()
+
+    # o3d.io.write_triangle_mesh("mesh_recon.obj", mesh_recon)
+    # o3d.io.write_triangle_mesh("mesh_recon_proc.obj", mesh_recon_proc)
+
+    return np.asarray(mesh_recon_proc.vertices), np.asarray(mesh_recon_proc.triangles), CD_loss_part
