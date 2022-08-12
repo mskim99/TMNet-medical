@@ -131,9 +131,9 @@ def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, r
 
         points_choice_parts[b_v_idx] = points_choice_parts[b_v_idx].reshape(1, points_choice_parts[b_v_idx].size(1),
                                                         points_choice_parts[b_v_idx].size(0))
-        dist1_p, dist2_p, _, _ = distChamfer(pointsRec_parts[b_v_idx], points_choice_parts[b_v_idx].detach())
-        CD_loss_part_bv = torch.mean(dist1_p) + torch.mean(dist2_p)
-        CD_loss_part = CD_loss_part + CD_loss_part_bv
+        # dist1_p, dist2_p, _, _ = distChamfer(pointsRec_parts[b_v_idx], points_choice_parts[b_v_idx].detach())
+        # CD_loss_part_bv = torch.mean(dist1_p) + torch.mean(dist2_p)
+        # CD_loss_part = CD_loss_part + CD_loss_part_bv
 
         if b_v_idx == 0:
             pointsRec = pointsRec_parts[b_v_idx]
@@ -144,7 +144,7 @@ def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, r
             v_idx_recon = torch.concat([v_idx_recon, b_f_list_gen[b_v_idx]], dim=0)
             points_orig_recon = torch.concat([points_orig_recon, points_choice_parts[b_v_idx]], dim=1)
 
-    CD_loss_part = CD_loss_part / float(8 ** level)
+    # CD_loss_part = CD_loss_part / float(8 ** level)
 
     v_idx_recon = v_idx_recon.cuda()
     faces_recon = None
@@ -159,6 +159,9 @@ def combine_meshes(pointsRec_parts, vertices_input_parts, points_choice_parts, r
 
 
 def combine_meshes_simp_dec(mesh_vertices, mesh_vertices_combine, mesh_vertices_gt, mesh_faces_part, mesh_triangles):
+
+    if len(mesh_vertices) <= 1:
+        return mesh_vertices_combine.squeeze(0).detach().cpu().numpy(), mesh_triangles.squeeze(0).detach().cpu().numpy(), 0.0
 
     mesh_recon = o3d.geometry.TriangleMesh()
     mesh_recon_proc = o3d.geometry.TriangleMesh()
@@ -205,6 +208,44 @@ def combine_meshes_simp_dec(mesh_vertices, mesh_vertices_combine, mesh_vertices_
     mesh_boundary.compute_triangle_normals()
     # o3d.io.write_triangle_mesh("mesh_boundary.obj", mesh_boundary)
 
+    mvc = mesh_vertices_combine.detach().cpu().numpy().reshape(-1, 3)
+    el_idx = []
+    for i in range(0, boundary_mesh_tri.shape[0]):
+        edge_length1 = np.linalg.norm(mvc[boundary_mesh_tri[i, 0]] - mvc[boundary_mesh_tri[i, 1]])
+        edge_length2 = np.linalg.norm(mvc[boundary_mesh_tri[i, 1]] - mvc[boundary_mesh_tri[i, 2]])
+        edge_length3 = np.linalg.norm(mvc[boundary_mesh_tri[i, 2]] - mvc[boundary_mesh_tri[i, 0]])
+        edge = (edge_length1 + edge_length2 + edge_length3) / 3.
+        el_idx.append([i, edge])
+    el_idx.sort(key=lambda x: (x[1], x[0]))
+
+    bt_num = len(el_idx)
+
+    # boundary_mesh_tri_dec = boundary_mesh_tri[np.array(el_idx[0 : (bt_num // 5)]).T[0].astype(int)]
+    boundary_mesh_tri_n = boundary_mesh_tri[np.array(el_idx[0 : 2 * (bt_num // 3)]).T[0].astype(int)]
+    boundary_mesh_tri_simp = boundary_mesh_tri[np.array(el_idx[2 * (bt_num // 3) + 1 : bt_num]).T[0].astype(int)]
+
+    # mesh_bd_dec = o3d.geometry.TriangleMesh()
+    mesh_bd_n = o3d.geometry.TriangleMesh()
+    mesh_bd_simp = o3d.geometry.TriangleMesh()
+
+    # mesh_bd_dec.vertices = o3d.utility.Vector3dVector(mesh_vertices_combine.detach().cpu().numpy().reshape(-1, 3))
+    mesh_bd_n.vertices = o3d.utility.Vector3dVector(mesh_vertices_combine.detach().cpu().numpy().reshape(-1, 3))
+    mesh_bd_simp.vertices = o3d.utility.Vector3dVector(mesh_vertices_combine.detach().cpu().numpy().reshape(-1, 3))
+
+    # mesh_bd_dec.triangles = o3d.utility.Vector3iVector(boundary_mesh_tri_dec)
+    mesh_bd_n.triangles = o3d.utility.Vector3iVector(boundary_mesh_tri_n)
+    mesh_bd_simp.triangles = o3d.utility.Vector3iVector(boundary_mesh_tri_simp)
+
+    # mesh_bd_dec.compute_triangle_normals()
+    mesh_bd_n.compute_triangle_normals()
+    mesh_bd_simp.compute_triangle_normals()
+
+    mesh_bd_simp = mesh_bd_simp.subdivide_midpoint(number_of_iterations=1)
+
+    # o3d.io.write_triangle_mesh("mesh_bd_dec.obj", mesh_bd_dec)
+    # o3d.io.write_triangle_mesh("mesh_bd_n.obj", mesh_bd_n)
+    # o3d.io.write_triangle_mesh("mesh_bd_simp.obj", mesh_bd_simp)
+
     '''
     mesh_recon += copy.deepcopy(mesh_boundary)
     mesh_recon = mesh_recon.remove_duplicated_triangles()
@@ -236,7 +277,9 @@ def combine_meshes_simp_dec(mesh_vertices, mesh_vertices_combine, mesh_vertices_
         CD_loss_part_bv = torch.mean(dist1_p) + torch.mean(dist2_p)
         CD_loss_part = CD_loss_part + CD_loss_part_bv
 
-    mesh_recon_proc += copy.deepcopy(mesh_boundary)
+    # mesh_recon_proc += copy.deepcopy(mesh_bd_dec)
+    mesh_recon_proc += copy.deepcopy(mesh_bd_n)
+    mesh_recon_proc += copy.deepcopy(mesh_bd_simp)
     mesh_recon_proc = mesh_recon_proc.remove_duplicated_triangles()
     mesh_recon_proc = mesh_recon_proc.remove_non_manifold_edges()
     mesh_recon_proc = mesh_recon_proc.remove_degenerate_triangles()

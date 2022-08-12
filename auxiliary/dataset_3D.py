@@ -73,10 +73,20 @@ class ShapeNet(data.Dataset):
             for fn in self.meta[item]:
                 self.datapath.append(fn)
 
-        self.transforms = transforms.Compose([
-                             transforms.Resize(size =  256, interpolation = 2),
-                             transforms.ToTensor(),
+        self.train_transforms = transforms.Compose([
+                            transforms.Resize(size =  256, interpolation = 2),
+                            # transforms.RandomCrop((224, 224)),
+                            transforms.ColorJitter(brightness=.4, contrast=.8, saturation=.4),
+                            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                            transforms.RandomHorizontalFlip(),
+                            transforms.RandomVerticalFlip(),
+                            transforms.ToTensor(),
                         ])
+        self.val_transforms = transforms.Compose([
+            transforms.Resize(size=256, interpolation=2),
+            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            transforms.ToTensor(),
+        ])
 
         self.perCatValueMeter = {}
         for item in self.cat:
@@ -97,6 +107,9 @@ class ShapeNet(data.Dataset):
         points_min = np.min(points_origin, axis=0)
         points_origin = (points_origin - points_min) / (points_max - points_min)
         points_origin = 2. * points_origin - 1.
+
+        # print(np.max(points_origin, axis=0))
+        # print(np.min(points_origin, axis=0))
 
         indices = np.random.randint(points_origin.shape[0], size=self.npoints)
         points_sampled = points_origin[indices,:]
@@ -143,7 +156,10 @@ class ShapeNet(data.Dataset):
                 filename = files[idx]
                 image = Image.open(filename)
                 image = image.resize([256, 256])
-                data = self.transforms(image)
+                if self.train:
+                    data = self.train_transforms(image)
+                else:
+                    data = self.val_transforms(image)
                 data = data[0, :, :]
                 stack_data[idx] = data
 

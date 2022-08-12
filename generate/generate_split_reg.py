@@ -23,13 +23,13 @@ from split_mesh import *
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=6)
-parser.add_argument('--model', type=str, default = './log/SVR_subnet2_usage2/network.pth',  help='your path to the trained model')
+parser.add_argument('--model', type=str, default = './log/SVR_subnet1_usage2/network.pth',  help='your path to the trained model')
 parser.add_argument('--num_points',type=int,default=10000)
 parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
 parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
 parser.add_argument('--num_vertices', type=int, default=2562) # 2562
-parser.add_argument('--subnet',type=int,default=2)
+parser.add_argument('--subnet',type=int,default=1)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
@@ -167,40 +167,45 @@ with torch.no_grad():
                     '''
         ###################################################################################################
         if opt.subnet > 2:
-            indices = (torch.arange(0, faces_cuda_bn.size(0)) * (1 + faces_cuda_bn.size(0)))\
-                .type(torch.cuda.LongTensor)
-            pointsRec2_boundary, selected_pair_all, selected_pair_all_len = \
-                get_boundary_points_bn(faces_cuda_bn, pointsRec2)
-            vector1 = (pointsRec2_boundary[:, :, 1] - pointsRec2_boundary[:, :, 0])
-            vector2 = (pointsRec2_boundary[:, :, 2] - pointsRec2_boundary[:, :, 0])
-            vector1 = vector1 / (torch.norm((vector1 + 1e-6), dim=2)).unsqueeze(2)
-            vector2 = vector2 / (torch.norm((vector2 + 1e-6), dim=2)).unsqueeze(2)
-            vector1 = vector1.transpose(2,1).detach()
-            vector2 = vector2.transpose(2,1).detach()
+            b_f_list_gt3, points_choice_parts3, b_f_list_gen3, pointsRec2_parts, range_part3 = split_mesh(points_choice,
+                                                                                                         pointsRec2.transpose(
+                                                                                                             2, 1),
+                                                                                                         level=1)
+            pointsRec3_parts = network(vol_part, pointsRec2_parts, mode='deform3')
 
-            if pointsRec2_boundary.shape[1] != 0:
-                pointsRec3_boundary = network\
-                    (img, pointsRec2_boundary[:, :, 0], vector1, vector2,mode='refine')
-            else:
-                pointsRec3_boundary = pointsRec2_boundary[:, :, 0]
+            # if i == 0:
+            # combine_meshes_simp_dec(pointsRec2_parts, points_choice_parts2, b_f_list_gen2, faces_cuda_bn)
 
-            pointsRec3_set = []
-            for ibatch in torch.arange(0, img.shape[0]):
-                length = selected_pair_all_len[ibatch]
-                if length != 0:
-                    # index_bp = boundary_points_all[ibatch][:length]
-                    index_bp = selected_pair_all[ibatch][:, 0][:length]
-                    prb_final = pointsRec3_boundary[ibatch][:length]
-                    pr = pointsRec2[ibatch]
-                    index_bp = index_bp.view(index_bp.shape[0], -1).expand([index_bp.shape[0], 3])
-                    pr_final = pr.scatter(dim=0, index=index_bp, source=prb_final)
-                    pointsRec3_set.append(pr_final)
-                else:
-                    pr = pointsRec2[ibatch]
-                    pr_final = pr
-                    pointsRec3_set.append(pr_final)
-            pointsRec3 = torch.stack(pointsRec3_set, 0)
-            triangles_c3 = faces_cuda_bn[0].cpu().data.numpy()
+            pointsRec3, _, _, _, _ = combine_meshes(pointsRec3_parts, np.array(pointsRec2_parts),
+                                                                        points_choice_parts3, range_part3,
+                                                                        b_f_list_gen3, faces_cuda_bn, False, level=1,
+                                                                        scale=1.)
+            pointsRec3, trianglesRec3, CD_loss_part3 = combine_meshes_simp_dec(pointsRec3_parts, pointsRec3,
+                                                                               points_choice_parts3, b_f_list_gen3,
+                                                                               faces_cuda_bn)
+            _, _, _, idx2_2 = distChamfer(points.float(), pointsRec2.float())  # PointsRec > Points
+            pointsRec3 = torch.tensor(pointsRec3).unsqueeze(0).float().cuda()
+            trianglesRec3 = torch.tensor(trianglesRec3).unsqueeze(0).float().cuda()
+
+            pointsRec3_samples, index = samples_random(trianglesRec3.detach().int(), pointsRec3, opt.num_points)
+            error = network(vol_part, pointsRec3_samples.detach().transpose(1, 2), mode='estimate3')
+            faces_cuda_bn = faces_cuda_bn.clone()
+            # faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau/opt.tau_decay, index, opt.pool)
+            # triangles_c2 = faces_cuda_bn[0].cpu().data.numpy()
+
+            pointsRec3 = torch.squeeze(pointsRec3)
+            trianglesRec3 = trianglesRec3.long()
+            normals_gen3 = torch.zeros(pointsRec3.shape).cuda()
+            v10 = pointsRec3[trianglesRec3[:, 1]] - pointsRec3[trianglesRec3[:, 0]]
+            v20 = pointsRec3[trianglesRec3[:, 2]] - pointsRec3[trianglesRec3[:, 0]]
+            normals_gen3_value = torch.cross(v10, v20)
+            normals_gen3[trianglesRec3[:, 0]] += normals_gen3_value[:]
+            normals_gen3[trianglesRec3[:, 1]] += normals_gen3_value[:]
+            normals_gen3[trianglesRec3[:, 2]] += normals_gen3_value[:]
+            normals_gen3_len = torch.sqrt(
+                normals_gen3[:, 0] * normals_gen3[:, 0] + normals_gen3[:, 1] * normals_gen3[:, 1] + normals_gen3[:, 2] * normals_gen3[:, 2])
+            normals_gen3 = normals_gen3 / normals_gen3_len.reshape(-1, 1)
+            pointsRec3 = torch.unsqueeze(pointsRec3, 0)
 
         print(cat,fn)
         if not os.path.exists(opt.model[:-4]):
@@ -213,6 +218,7 @@ with torch.no_grad():
         b = np.zeros((np.shape(faces)[0],4)) + 3
         b[:,1:] = faces
 
+        '''
         triangles_c1_tosave = triangles_c1[triangles_c1.sum(1).nonzero()[0]]
         b_c1 = np.zeros((np.shape(triangles_c1_tosave)[0],4)) + 3
         b_c1[:,1:] = triangles_c1_tosave
@@ -224,7 +230,7 @@ with torch.no_grad():
             triangles_c3_tosave = triangles_c3[triangles_c3.sum(1).nonzero()[0]]
             b_c3 = np.zeros((np.shape(triangles_c3_tosave)[0],4)) + 3
             b_c3[:,1:] = triangles_c3_tosave
-
+            '''
 
         meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn+"_GT.obj",
                                 points.cpu().data.squeeze().numpy(), triangles=faces_gt.cpu().data.squeeze().numpy().astype(int))
@@ -264,6 +270,12 @@ with torch.no_grad():
                                     triangles=triangles_c2, normals=normals_gen2)
                                     '''
         if opt.subnet>2:
+            '''
             write_ply(filename=opt.model[:-4] + "/" + str(cat) + "/" + fn+"_gen3",
                       points=pd.DataFrame(pointsRec3.cpu().data.squeeze().numpy()), as_text=True,
                       faces = pd.DataFrame(b_c3.astype(int)))
+                      '''
+            meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen3.obj",
+                                    pointsRec3.cpu().data.squeeze().numpy(),
+                                    triangles=trianglesRec3.cpu().data.squeeze().numpy(),
+                                    normals=normals_gen3.cpu().data.squeeze().numpy())

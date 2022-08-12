@@ -85,17 +85,6 @@ class DeformNet(nn.Module):
         self.bottleneck_size = bottleneck_size
         super(DeformNet, self).__init__()
 
-        '''
-        self.conv1 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size, 1)
-        self.conv2 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size//2, 1)
-        self.conv3 = torch.nn.Conv1d(self.bottleneck_size//2, self.bottleneck_size//4, 1)
-        self.conv4 = torch.nn.Conv1d(self.bottleneck_size//4, 3, 1)
-        
-        self.bn1 = torch.nn.BatchNorm1d(self.bottleneck_size)
-        self.bn2 = torch.nn.BatchNorm1d(self.bottleneck_size//2)
-        self.bn3 = torch.nn.BatchNorm1d(self.bottleneck_size//4)
-        '''
-
         self.conv1 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size, 1)
         self.conv2 = torch.nn.Conv1d(self.bottleneck_size, (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
         self.conv3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), self.bottleneck_size // 2, 1)
@@ -107,89 +96,13 @@ class DeformNet(nn.Module):
         self.bn3 = torch.nn.BatchNorm1d(self.bottleneck_size // 2)
         self.bn4 = torch.nn.BatchNorm1d(self.bottleneck_size // 4)
 
-        '''
-        self.conv1 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size, 1)
-        self.conv2 = torch.nn.Conv1d(self.bottleneck_size, (self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), 1)
-        # self.conv2_3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), 1)
-        self.conv3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
-        # self.conv3_4 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
-        self.conv4 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), (self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), 1)
-        # self.conv4_5 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), 1)
-        self.conv5 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8), self.bottleneck_size // 2, 1)
-        # self.conv5_6 = torch.nn.Conv1d(self.bottleneck_size // 2, self.bottleneck_size // 2, 1)
-        self.conv6 = torch.nn.Conv1d(self.bottleneck_size // 2, (self.bottleneck_size // 2 - self.bottleneck_size // 8), 1)
-        # self.conv6_7 = torch.nn.Conv1d((self.bottleneck_size // 2 - self.bottleneck_size // 8), (self.bottleneck_size // 2 - self.bottleneck_size // 8), 1)
-        self.conv7 = torch.nn.Conv1d((self.bottleneck_size // 2 - self.bottleneck_size // 8), self.bottleneck_size // 4, 1)
-        # self.conv7_8 = torch.nn.Conv1d(self.bottleneck_size // 4, self.bottleneck_size // 4, 1)
-        self.conv8 = torch.nn.Conv1d(self.bottleneck_size // 4, self.bottleneck_size // 8, 1)
-        # self.conv8_9 = torch.nn.Conv1d(self.bottleneck_size // 8, self.bottleneck_size // 8, 1)
-        self.conv9 = torch.nn.Conv1d(self.bottleneck_size // 8, 3, 1)
-
-        self.bn1 = torch.nn.BatchNorm1d(self.bottleneck_size)
-        self.bn2 = torch.nn.BatchNorm1d(self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8)
-        self.bn3 = torch.nn.BatchNorm1d(self.bottleneck_size // 2 + self.bottleneck_size // 4)
-        self.bn4 = torch.nn.BatchNorm1d(self.bottleneck_size // 2 + self.bottleneck_size // 4 - self.bottleneck_size // 8)
-        self.bn5 = torch.nn.BatchNorm1d(self.bottleneck_size // 2)
-        self.bn6 = torch.nn.BatchNorm1d(self.bottleneck_size // 2 - self.bottleneck_size // 8)
-        self.bn7 = torch.nn.BatchNorm1d(self.bottleneck_size // 4)
-        self.bn8 = torch.nn.BatchNorm1d(self.bottleneck_size // 8)
-        '''
-
         # self.fc = nn.Linear(14508, 7500)
         self.th = nn.Tanh()
+        self.sigmoid = nn.Sigmoid()
 
         self.maxpool = torch.nn.MaxPool3d(kernel_size=3, stride=2, padding=1)
 
     def forward(self, x, drp_idx):
-
-        # Modified Code
-        '''
-        # print(x.shape)
-        x = F.relu(self.bn1(self.conv1(x)))
-        c2 = self.maxpool(cat_features[2])
-        c2 = c2.view(1, c2.size(1) * 2, -1)
-        x = torch.cat([x, c2], dim=2)
-        # print(x.shape)
-        x = F.relu(self.bn2(self.conv2(x)))
-        c1 = self.maxpool(cat_features[1])
-        c1 = c1.view(1, c1.size(1) * 2, -1)
-        x = torch.cat([x, c1], dim=2)
-        # print(c2.shape)
-        # print(x.shape)
-        x = F.relu(self.bn3(self.conv3(x)))
-        c0 = self.maxpool(cat_features[0])
-        c0 = c0.view(1, c0.size(1) * 2, -1)
-        x = torch.cat([x, c0], dim=2)
-        # print(x.shape)
-        x = self.conv4(x)
-        # print(x.shape)
-
-        x = x.view(1, -1)
-        # print(x.shape)
-        x = self.fc(x)
-        x = x.view(1, 3, -1)
-        x = self.th(x)
-        # print(x.shape)
-        '''
-
-        '''
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        # x = F.relu(self.bn2(self.conv2_3(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
-        # x = F.relu(self.bn3(self.conv3_4(x)))
-        x = F.relu(self.bn4(self.conv4(x)))
-        # x = F.relu(self.bn4(self.conv4_5(x)))
-        x = F.relu(self.bn5(self.conv5(x)))
-        # x = F.relu(self.bn5(self.conv5_6(x)))
-        x = F.relu(self.bn6(self.conv6(x)))
-        # x = F.relu(self.bn6(self.conv6_7(x)))
-        x = F.relu(self.bn7(self.conv7(x)))
-        # x = F.relu(self.bn7(self.conv7_8(x)))
-        x = F.relu(self.bn8(self.conv8(x)))
-        # x = F.relu(self.bn8(self.conv8_9(x)))
-        x = self.th(self.conv9(x))
-        '''
 
         # Original Code
         x = F.relu(self.bn1(self.conv1(x)))
@@ -200,45 +113,99 @@ class DeformNet(nn.Module):
         # print(x.shape)
         x = F.relu(self.bn4(self.conv4(x)))
         # print(x.shape)
+        # x = self.Sigmoid(self.conv5(x))
+        # x = self.conv5(x)
         x = self.th(self.conv5(x))
         # print(x.shape)
 
         return x
 
 
-class DeformNet_split(nn.Module):
+class DeformNet_layer8(nn.Module):
+    def __init__(self, bottleneck_size = 1024):
+        self.bottleneck_size = bottleneck_size
+        super(DeformNet_layer8, self).__init__()
+
+        self.conv1 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size, 1)
+        self.conv2 = torch.nn.Conv1d(self.bottleneck_size, (self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), 1)
+        self.conv3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8), (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
+        self.conv4 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), self.bottleneck_size // 2, 1)
+        self.conv5 = torch.nn.Conv1d(self.bottleneck_size // 2, (self.bottleneck_size // 4 + self.bottleneck_size // 8), 1)
+        self.conv6 = torch.nn.Conv1d((self.bottleneck_size // 4 + self.bottleneck_size // 8), self.bottleneck_size // 4, 1)
+        self.conv7 = torch.nn.Conv1d(self.bottleneck_size // 4, self.bottleneck_size // 8, 1)
+        self.conv8 = torch.nn.Conv1d(self.bottleneck_size // 8, 3, 1)
+
+        self.bn1 = torch.nn.BatchNorm1d(self.bottleneck_size)
+        self.bn2 = torch.nn.BatchNorm1d(self.bottleneck_size // 2 + self.bottleneck_size // 4 + self.bottleneck_size // 8)
+        self.bn3 = torch.nn.BatchNorm1d(self.bottleneck_size // 2 + self.bottleneck_size // 4)
+        self.bn4 = torch.nn.BatchNorm1d(self.bottleneck_size // 2)
+        self.bn5 = torch.nn.BatchNorm1d(self.bottleneck_size // 4 + self.bottleneck_size // 8)
+        self.bn6 = torch.nn.BatchNorm1d(self.bottleneck_size // 4)
+        self.bn7 = torch.nn.BatchNorm1d(self.bottleneck_size // 8)
+
+        # self.fc = nn.Linear(14508, 7500)
+        self.th = nn.Tanh()
+        self.sigmoid = nn.Sigmoid()
+
+        self.maxpool = torch.nn.MaxPool3d(kernel_size=3, stride=2, padding=1)
+
+    def forward(self, x, drp_idx):
+
+        # Original Code
+        x = F.relu(self.bn1(self.conv1(x)))
+        # print(x.shape)
+        x = F.relu(self.bn2(self.conv2(x)))
+        # print(x.shape)
+        x = F.relu(self.bn3(self.conv3(x)))
+        # print(x.shape)
+        x = F.relu(self.bn4(self.conv4(x)))
+        # print(x.shape)
+        x = F.relu(self.bn5(self.conv5(x)))
+        # print(x.shape)
+        x = F.relu(self.bn6(self.conv6(x)))
+        # print(x.shape)
+        x = F.relu(self.bn7(self.conv7(x)))
+        # print(x.shape)
+        x = self.th(self.conv8(x))
+        # print(x.shape)
+
+        return x
+
+
+class DeformNet_scale(nn.Module):
     def __init__(self, bottleneck_size=1024):
         self.bottleneck_size = bottleneck_size
-        super(DeformNet, self).__init__()
+        super(DeformNet_scale, self).__init__()
 
         self.conv1 = torch.nn.Conv1d(self.bottleneck_size, self.bottleneck_size, 1)
         self.conv2 = torch.nn.Conv1d(self.bottleneck_size, (self.bottleneck_size // 2 + self.bottleneck_size // 4), 1)
         self.conv3 = torch.nn.Conv1d((self.bottleneck_size // 2 + self.bottleneck_size // 4), self.bottleneck_size // 2, 1)
         self.conv4 = torch.nn.Conv1d(self.bottleneck_size // 2, self.bottleneck_size // 4, 1)
-        self.conv5 = torch.nn.Conv1d(self.bottleneck_size // 4, 3, 1)
+        self.conv5 = torch.nn.Conv1d(self.bottleneck_size // 4, 1, 1)
 
+        '''
         self.bn1 = torch.nn.BatchNorm1d(self.bottleneck_size)
         self.bn2 = torch.nn.BatchNorm1d(self.bottleneck_size // 2 + self.bottleneck_size // 4)
         self.bn3 = torch.nn.BatchNorm1d(self.bottleneck_size // 2)
         self.bn4 = torch.nn.BatchNorm1d(self.bottleneck_size // 4)
+        '''
 
-        self.th = nn.Tanh()
-
-        self.maxpool = torch.nn.MaxPool3d(kernel_size=3, stride=2, padding=1)
+        self.tanh = nn.Tanh()
+        self.relu = nn.ReLU()
 
     def forward(self, x, points):
 
         # Original Code
-        x = F.relu(self.bn1(self.conv1(x)))
-        print(x.shape)
-        x = F.relu(self.bn2(self.conv2(x)))
-        print(x.shape)
-        x = F.relu(self.bn3(self.conv3(x)))
-        print(x.shape)
-        x = F.relu(self.bn4(self.conv4(x)))
-        print(x.shape)
-        x = self.th(self.conv5(x))
-        print(x.shape)
+        x = F.relu(self.conv1(x))
+        # print(x.shape)
+        x = F.relu(self.conv2(x))
+        # print(x.shape)
+        x = F.relu(self.conv3(x))
+        # print(x.shape)
+        x = F.relu(self.conv4(x))
+        # print(x.shape)
+        x = torch.mean(self.conv5(x))
+        # print(x.shape)
 
         return x
 
@@ -370,6 +337,78 @@ class DeformNet_Res(nn.Module):
         return x
 
 
+class Decoder_volume(torch.nn.Module):
+    def __init__(self):
+        super(Decoder_volume, self).__init__()
+
+        self.d_layer1 = torch.nn.Sequential(
+            torch.nn.ConvTranspose3d(1024, 512, kernel_size=4, stride=2, padding=1, bias=False),
+            torch.nn.BatchNorm3d(512),
+            torch.nn.ReLU(inplace=True),
+        )
+        self.d_layer2 = torch.nn.Sequential(
+            torch.nn.ConvTranspose3d(512, 256, kernel_size=4, stride=2, padding=1, bias=False),
+            torch.nn.BatchNorm3d(256),
+            torch.nn.ReLU(inplace=True),
+        )
+        self.d_layer3 = torch.nn.Sequential(
+            torch.nn.ConvTranspose3d(256, 128, kernel_size=4, stride=2, padding=1, bias=False),
+            torch.nn.BatchNorm3d(128),
+            torch.nn.ReLU(inplace=True),
+        )
+        self.d_layer4 = torch.nn.Sequential(
+            torch.nn.ConvTranspose3d(128, 64, kernel_size=4, stride=2, padding=1, bias=False),
+            torch.nn.BatchNorm3d(64),
+            torch.nn.ReLU(inplace=True),
+        )
+        self.d_layer5 = torch.nn.Sequential(
+            torch.nn.ConvTranspose3d(64, 32, kernel_size=4, stride=2, padding=1, bias=False),
+            torch.nn.BatchNorm3d(32),
+            torch.nn.ReLU(inplace=True),
+        )
+        self.d_layer6 = torch.nn.Sequential(
+            torch.nn.ConvTranspose3d(32, 16, kernel_size=4, stride=2, padding=1, bias=False),
+            torch.nn.BatchNorm3d(16),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Sigmoid(),
+        )
+        self.d_layer7 = torch.nn.Sequential(
+            torch.nn.ConvTranspose3d(16, 8, kernel_size=4, stride=2, padding=1, bias=False),
+            torch.nn.BatchNorm3d(8),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Sigmoid(),
+        )
+        self.d_layer8 = torch.nn.Sequential(
+            torch.nn.ConvTranspose3d(8, 1, kernel_size=4, stride=2, padding=1, bias=False),
+            torch.nn.Sigmoid(),
+        )
+
+
+    def forward(self, features):
+
+        features = features.reshape([-1, 1024, 1, 1, 1])
+
+        gen_volume = self.d_layer1(features)
+        # print(gen_volume.size()) # torch.Size([1, 1024, 1, 1, 1])
+        gen_volume = self.d_layer2(gen_volume)
+        # print(gen_volume.size()) # torch.Size([1, 512, 2, 2, 2])
+        gen_volume = self.d_layer3(gen_volume)
+        # print(gen_volume.size()) # torch.Size([1, 256, 4, 4, 4])
+        gen_volume = self.d_layer4(gen_volume)
+        # print(gen_volume.size()) # torch.Size([1, 128, 8, 8, 8])
+        gen_volume = self.d_layer5(gen_volume)
+        # print(gen_volume.size()) # torch.Size([1, 64, 16, 16, 16])
+        gen_volume = self.d_layer6(gen_volume)
+        # print(gen_volume.size()) # torch.Size([1, 32, 32, 32, 32])
+        gen_volume = self.d_layer7(gen_volume)
+        # print(gen_volume.size()) # torch.Size([1, 16, 64, 64, 64])
+        gen_volume = self.d_layer8(gen_volume)
+        # print(gen_volume.size()) # torch.Size([1, 8, 128, 128, 128])
+        gen_volume = torch.squeeze(gen_volume)
+
+        return gen_volume
+
+
 class Refiner(nn.Module):
     def __init__(self, bottleneck_size = 1024):
         self.bottleneck_size = bottleneck_size
@@ -462,6 +501,9 @@ class SVR_TMNet_Split(nn.Module):
         self.decoder = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.decoder2 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
         self.decoder3 = nn.ModuleList([DeformNet(bottleneck_size=3 + self.bottleneck_size)])
+        # self.decoder4 = nn.ModuleList([DeformNet_scale(bottleneck_size=3 + self.bottleneck_size)])
+        self.decoder_vol = Decoder_volume()
+        self.decoder_vol2 = Decoder_volume()
         self.estimate = Estimator(bottleneck_size=3 + self.bottleneck_size)
         self.estimate2 = Estimator(bottleneck_size=3+self.bottleneck_size)
         self.estimate3 = Estimator(bottleneck_size=3+self.bottleneck_size)
@@ -483,8 +525,10 @@ class SVR_TMNet_Split(nn.Module):
                 y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points[i].size(2)).contiguous()
                 y = torch.cat((points[i], y), 1).contiguous()
                 res = self.decoder[0](y, points[i].shape[1])
+                res_vol = self.decoder_vol(x_part)
                 # res = res + points[i].unsqueeze(dim=0)
                 outs.append(res.contiguous().transpose(2,1).contiguous())
+            return outs, res_vol
         elif mode == 'deform2':
             x_part = x[0]
             x_part = x_part[:,:3,:,:].contiguous()
@@ -495,20 +539,47 @@ class SVR_TMNet_Split(nn.Module):
                 y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points[i].size(2)).contiguous()
                 y = torch.cat((points[i], y), 1).contiguous()
                 res = self.decoder2[0](y, points[i].shape[1])
+                res_vol = self.decoder_vol2(x_part)
+                # res = self.decoder2[0](y)
                 res = res + points[i]
                 outs.append(res.contiguous().transpose(2,1).contiguous())
+            return outs, res_vol
         elif mode == 'deform3':
             x_part = x[0]
             x_part = x_part[:,:3,:,:].contiguous()
             x_part, _ = self.encoder(x_part)
+
             for i in range(0, points.shape[0]):
                 if points[i].size(1) != 3:
                     points[i] = points[i].transpose(2, 1)
                 y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points[i].size(2)).contiguous()
                 y = torch.cat((points[i], y), 1).contiguous()
-                res = self.decoder3[0](y, points[i].shape[1])
-                res = 0.1 * res + points[i]
+
+                vec = self.decoder3[0](y, 0)
+
+                res = 1e-5 * vec + points[i]
+                print(vec)
                 outs.append(res.contiguous().transpose(2,1).contiguous())
+            # np.savetxt('./reses.txt', np.array([t.detach().cpu().numpy() for t in outs]).reshape(-1))
+            return outs
+        elif mode == 'deform3_mlt':
+            for i in range(0, points.shape[0]):
+                x_part = x[i]
+                x_part = x_part[:, :3, :, :].contiguous()
+                x_part, _ = self.encoder(x_part)
+
+                if points[i].size(1) != 3:
+                    points[i] = points[i].transpose(2, 1)
+                y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points[i].size(2)).contiguous()
+                y = torch.cat((points[i], y), 1).contiguous()
+
+                vec = self.decoder3[0](y, 0)
+
+                res = 0.25 * vec + points[i]
+                # print(vec)
+                outs.append(res.contiguous().transpose(2, 1).contiguous().detach())
+            # np.savetxt('./reses.txt', np.array([t.detach().cpu().numpy() for t in outs]).reshape(-1))
+            return outs
         elif mode == 'estimate':
             x_part = x[0]
             x_part = x_part[:, :3, :, :].contiguous()
@@ -519,6 +590,7 @@ class SVR_TMNet_Split(nn.Module):
             y = torch.cat((points, y), 1).contiguous()
             outs = self.estimate(y)
             outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+            return outs
         elif mode == 'estimate2':
             x_part = x[0]
             x_part = x_part[:, :3, :, :].contiguous()
@@ -529,6 +601,7 @@ class SVR_TMNet_Split(nn.Module):
             y = torch.cat((points, y), 1).contiguous()
             outs = self.estimate2(y)
             outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+            return outs
         elif mode == 'estimate3':
             x_part = x[0]
             x_part = x_part[:, :3, :, :].contiguous()
@@ -539,15 +612,34 @@ class SVR_TMNet_Split(nn.Module):
             y = torch.cat((points, y), 1).contiguous()
             outs = self.estimate3(y)
             outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+            return outs
         elif mode == 'refine':
             outs = self.refine(y)
             outs1 = outs[:, 0].unsqueeze(1)
             outs2 = outs[:, 1].unsqueeze(1)
             outs = outs1 * vector1 + outs2 * vector2 + points
+            return outs
+        elif mode == 'refine_split':
+            x_part = x[0]
+            x_part = x_part[:,:3,:,:].contiguous()
+            x_part, _ = self.encoder(x_part)
+
+            for i in range(0, points.shape[0]):
+                if points[i].size(1) != 3:
+                    points[i] = points[i].transpose(2, 1)
+                y = x_part.unsqueeze(2).expand(x_part.size(0), x_part.size(1), points[i].size(2)).contiguous()
+                y = torch.cat((points[i], y), 1).contiguous()
+
+                outs = self.refine(y)
+                outs1 = outs[:, 0].unsqueeze(1)
+                outs2 = outs[:, 1].unsqueeze(1)
+                outs = outs1 * vector1 + outs2 * vector2 + points
+                outs = outs.contiguous().transpose(2,1).contiguous().squeeze(2)
+            return outs
         else:
             outs = None
+            return outs
         # return outs.contiguous().transpose(2,1).contiguous().squeeze(2)
-        return outs
 
 class Pretrain(nn.Module):
     def __init__(self,  bottleneck_size = 1024,num_points=2500):

@@ -20,13 +20,13 @@ import sklearn.preprocessing as sklp
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=6)
-parser.add_argument('--model', type=str, default = './log/SVR_subnet1_1/network.pth',  help='your path to the trained model')
+parser.add_argument('--model', type=str, default = './log/SVR_subnet1_usage2/network.pth',  help='your path to the trained model')
 parser.add_argument('--num_points',type=int,default=10000)
 parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
 parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
 parser.add_argument('--num_vertices', type=int, default=7682) # 2562
-parser.add_argument('--subnet',type=int,default=2)
+parser.add_argument('--subnet',type=int,default=1)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
@@ -97,7 +97,7 @@ with torch.no_grad():
         pointsRec_samples, index = samples_random(faces_cuda, pointsRec, opt.num_points)
         error = network(img, pointsRec_samples.detach().transpose(1, 2),mode='estimate')
         faces_cuda_bn = faces_cuda.unsqueeze(0)
-        faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau, index, opt.pool)
+        # faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau, index, opt.pool)
         triangles_c1 = faces_cuda_bn[0].cpu().data.numpy()
 
         pointsRec = torch.squeeze(pointsRec)
@@ -125,15 +125,20 @@ with torch.no_grad():
             pointsRec2_samples, index = samples_random(faces_cuda_bn, pointsRec2, opt.num_points)
             error = network(img, pointsRec2_samples.detach().transpose(1, 2),mode='estimate2')
             faces_cuda_bn = faces_cuda_bn.clone()
-            faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau/opt.tau_decay, index, opt.pool)
+            # faces_cuda_bn = prune(faces_cuda_bn, error, opt.tau/opt.tau_decay, index, opt.pool)
             triangles_c2 = faces_cuda_bn[0].cpu().data.numpy()
 
             pointsRec2 = torch.squeeze(pointsRec2)
+            normals_gen2 = torch.zeros(pointsRec2.shape).cuda()
             v10 = pointsRec2[triangles_c2[:, 1]] - pointsRec2[triangles_c2[:, 0]]
             v20 = pointsRec2[triangles_c2[:, 2]] - pointsRec2[triangles_c2[:, 0]]
-            normals_gen2 = torch.cross(v10, v20)
-            normals_gen2 = normals_gen2.cpu().data.numpy()
-            normals_gen2 = sklp.normalize(normals_gen2, axis=1)
+            normals_gen2_value = torch.cross(v10, v20)
+            normals_gen2[triangles_c2[:, 0]] += normals_gen2_value[:]
+            normals_gen2[triangles_c2[:, 1]] += normals_gen2_value[:]
+            normals_gen2[triangles_c2[:, 2]] += normals_gen2_value[:]
+            normals_gen2_len = torch.sqrt(
+                normals_gen2[:, 0] * normals_gen2[:, 0] + normals_gen2[:, 1] * normals_gen2[:, 1] + normals_gen2[:,2] * normals_gen2[:,2])
+            normals_gen2 = normals_gen2 / normals_gen2_len.reshape(-1, 1)
             pointsRec2 = torch.unsqueeze(pointsRec2, 0)
 
         ###################################################################################################
