@@ -76,10 +76,10 @@ class ShapeNet(data.Dataset):
         self.train_transforms = transforms.Compose([
                             transforms.Resize(size =  256, interpolation = 2),
                             # transforms.RandomCrop((224, 224)),
-                            transforms.ColorJitter(brightness=.4, contrast=.8, saturation=.4),
+                            # transforms.ColorJitter(brightness=.4, contrast=.8, saturation=.4),
                             # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                            transforms.RandomHorizontalFlip(),
-                            transforms.RandomVerticalFlip(),
+                            # transforms.RandomHorizontalFlip(),
+                            # transforms.RandomVerticalFlip(),
                             transforms.ToTensor(),
                         ])
         self.val_transforms = transforms.Compose([

@@ -23,20 +23,19 @@ from split_mesh import *
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=6)
-parser.add_argument('--model', type=str, default = './log/SVR_subnet1_usage2/network.pth',  help='your path to the trained model')
+parser.add_argument('--model', type=str, default = './log/SVR_subnet2_usage2/network.pth',  help='your path to the trained model')
 parser.add_argument('--num_points',type=int,default=10000)
 parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
 parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
 parser.add_argument('--num_vertices', type=int, default=2562) # 2562
-parser.add_argument('--subnet',type=int,default=1)
+parser.add_argument('--subnet',type=int,default=2)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
 
-# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# os.environ["CUDA_VISIBLE_DEVICES"] = '3'
-
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 torch.cuda.set_device(3)
 
 sys.path.append("./extension/")
@@ -54,17 +53,17 @@ dataloader_test = torch.utils.data.DataLoader(dataset_test, batch_size=opt.batch
 print('testing set', len(dataset_test.datapath))
 len_dataset = len(dataset_test)
 
-name = 'sphere' + str(opt.num_vertices) + '.mat'
-mesh = sio.loadmat('./data/' + name)
-# name = 'sphere' + str(opt.num_vertices) + '.obj'
-# mesh = meshio_custom.read_obj('./data/' + name)
+# name = 'sphere' + str(opt.num_vertices) + '.mat'
+# mesh = sio.loadmat('./data/' + name)
+name = 'sphere' + str(opt.num_vertices) + '.obj'
+mesh = meshio_custom.read_obj('./data/' + name)
 
-faces = np.array(mesh['f'])
-# faces = mesh['faces']
+# faces = np.array(mesh['f'])
+faces = mesh['faces']
 faces_cuda = torch.from_numpy(faces.astype(int)).type(torch.cuda.LongTensor)
 
-vertices_sphere = np.array(mesh['v'])
-# vertices_sphere = mesh['vertices']
+# vertices_sphere = np.array(mesh['v'])
+vertices_sphere = mesh['vertices']
 vertices_sphere = (torch.cuda.FloatTensor(vertices_sphere)).transpose(0,1).contiguous()
 vertices_sphere = vertices_sphere.contiguous().unsqueeze(0)
 
@@ -132,15 +131,15 @@ with torch.no_grad():
 
         ###################################################################################################
         if opt.subnet > 1:
-            b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=0)
-            pointsRec2_parts = network(vol_part, pointsRec_parts, mode='deform2')
-
-            # if i == 0:
-                # combine_meshes_simp_dec(pointsRec2_parts, points_choice_parts2, b_f_list_gen2, faces_cuda_bn)
-
-            pointsRec2, _, CD_loss_part2, _, facesRec2 = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, faces_cuda_bn, False, level=0, scale=1.)
-
-            _, _, _, idx2_2 = distChamfer(points.float(), pointsRec2.float())  # PointsRec > Points
+            b_f_list_gt2, points_choice_parts2, b_f_list_gen2, pointsRec_parts, range_part2 = split_mesh(points_choice, pointsRec.transpose(2,1), level=1)
+            vol_parts = split_volume(img, level=1)
+            pointsRec2_parts = network(vol_parts, pointsRec_parts, mode='deform2')
+            pointsRec2, _, _, _, _ = combine_meshes(pointsRec2_parts, pointsRec_parts, points_choice_parts2, range_part2, b_f_list_gen2, faces_cuda_bn, False, level=1, scale=1.)
+            pointsRec2_sd, trianglesRec2, CD_loss_part2 = combine_meshes_simp_dec(pointsRec2_parts, pointsRec2,points_choice_parts2, b_f_list_gen2,faces_cuda_bn)
+            pointsRec2_sd = torch.tensor(pointsRec2_sd).unsqueeze(0).float().cuda()
+            trianglesRec2 = torch.tensor(trianglesRec2).unsqueeze(0).int().cuda()
+            triangles_c2_sd = trianglesRec2[0].cpu().data.numpy()
+            # _, _, _, idx2_2 = distChamfer(points.float(), pointsRec2.float())  # PointsRec > Points
 
             pointsRec2_samples, index = samples_random(faces_cuda_bn, pointsRec2, opt.num_points)
             error = network(vol_part, pointsRec2_samples.detach().transpose(1, 2),mode='estimate2')
@@ -261,9 +260,14 @@ with torch.no_grad():
                       points=pd.DataFrame(pointsRec2.cpu().data.squeeze().numpy()), as_text=True,
                       faces = pd.DataFrame(b_c2.astype(int)))
                       '''
+            '''
             meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2.obj",
                                     pointsRec2.cpu().data.squeeze().numpy(),
-                                    triangles=triangles_c1, normals=normals_gen2.cpu().numpy())
+                                    triangles=triangles_c2)
+                                    '''
+            meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2.obj",
+                                    pointsRec2_sd.cpu().data.squeeze().numpy(),
+                                    triangles=triangles_c2_sd)
             '''
             meshio_custom.write_obj(opt.model[:-4] + "/" + str(cat) + "/" + fn + "_gen2_pruned.obj",
                                     pointsRec2.cpu().data.squeeze().numpy(),

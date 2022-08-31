@@ -33,7 +33,7 @@ parser.add_argument('--model', type=str, default='', help='model path from the p
 parser.add_argument('--num_points', type=int, default=10000, help='number of points for GT point cloud') # 10000
 parser.add_argument('--num_vertices', type=int, default=2562, help='number of vertices of the initial sphere')
 parser.add_argument('--num_samples',type=int,default=5000, help='number of samples for error estimation') # 2500
-parser.add_argument('--env', type=str, default="SVR_subnet1_3_split", help='visdom env')
+parser.add_argument('--env', type=str, default="SVR_subnet1_1_split", help='visdom env')
 parser.add_argument('--lr', type=float, default=1e-5, help='initial learning rate')
 parser.add_argument('--tau', type=float, default=0.1, help='threshold to prune the faces')
 parser.add_argument('--lambda_edge', type=float, default=1e-5, help='weight of edge loss') # 0.05
@@ -62,9 +62,9 @@ print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
-torch.cuda.set_device(3)
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"] = '3'
+torch.cuda.set_device(1)
 
 dataset = ShapeNet(npoints=opt.num_points, SVR=True, normal=True, train=True, class_choice='lumbar_vertebra_05')
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
@@ -229,8 +229,8 @@ for epoch in range(opt.nepoch):
         # uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
         # uniform_loss_local = get_uniform_loss_local(pointsRec.squeeze().cpu().data.numpy(),b_v_list_gen, b_v_list_gt)
 
-        # loss_net = CD_loss + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss + 0.1 * vol_l1_loss # + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
-        loss_net = CD_loss + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss
+        loss_net = CD_loss + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss # + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
+        # loss_net = CD_loss + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss
 
         loss_net.backward()
         train_CD_loss.update(CD_loss.item())
@@ -255,16 +255,17 @@ for epoch in range(opt.nepoch):
                             markersize=2,
                         ),
                         )
-        '''
+
         print(
             '[%d: %d/%d] train_cd_loss:  %f , CD_loss_part:  %f ,l2_loss: %f, edge_loss: %f, normal_loss: %f, vol_l1_loss: %f, loss_net: %f' %
-            (epoch, i, len_dataset / opt.batchSize, CD_loss.item(), CD_loss_part, l2_loss.item(), edge_loss.item(), normal_loss.item(), vol_l1_loss.item(), loss_net.item()))
-            '''
+            (epoch, i, len_dataset / opt.batchSize, CD_loss.item(), CD_loss_part, l2_loss.item(), edge_loss.item(), normal_loss.item(), 0.0, loss_net.item()))
 
+        '''
         print(
             '[%d: %d/%d] train_cd_loss:  %f , CD_loss_part:  %f ,l2_loss: %f, edge_loss: %f, normal_loss: %f, loss_net: %f' %
             (epoch, i, len_dataset / opt.batchSize, CD_loss.item(), CD_loss_part, l2_loss.item(), edge_loss.item(),
              normal_loss.item(), loss_net.item()))
+            '''
 
     train_CD_curve.append(train_CD_loss.avg)
     train_CDs_curve.append(train_CDs_loss.avg)
@@ -334,8 +335,8 @@ for epoch in range(opt.nepoch):
             # uniform_loss_global, b_v_list_gen, b_v_list_gt = get_uniform_loss_global(pointsRec.squeeze().cpu().data.numpy(), points_orig.squeeze().cpu().data.numpy())
             # uniform_loss_local = get_uniform_loss_local(b_v_list_gen.squeeze().cpu().data.numpy(), b_v_list_gt.squeeze().cpu().data.numpy())
 
-            # loss_net = CD_loss + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss + 0.1 * vol_l1_loss # + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
-            loss_net = CD_loss + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss
+            loss_net = CD_loss + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss # + opt.lambda_uniform * uniform_loss_global * uniform_loss_local
+            # loss_net = CD_loss + opt.lambda_edge * edge_loss + l2_loss + opt.lambda_normal * normal_loss
 
             val_CD_loss.update(CD_loss.item())
             dataset_test.perCatValueMeter[cat[0]].update(CDs_loss.item())
@@ -358,14 +359,15 @@ for epoch in range(opt.nepoch):
                                 markersize=2,
                             ),
                             )
-            '''
-            print('[%d: %d/%d] val_cd_loss:  %f, CD_loss_part:  %f ,l2_loss: %f, edge_loss: %f, normal_loss: %f, vol_l1_loss: %f, loss_net: %f'
-                  % (epoch, i, len(dataset_test) / opt.batchSize, CD_loss.item(), CD_loss_part, l2_loss.item(), edge_loss.item(), normal_loss.item(), vol_l1_loss.item(), loss_net.item()))
-                  '''
 
+            print('[%d: %d/%d] val_cd_loss:  %f, CD_loss_part:  %f ,l2_loss: %f, edge_loss: %f, normal_loss: %f, vol_l1_loss: %f, loss_net: %f'
+                  % (epoch, i, len(dataset_test) / opt.batchSize, CD_loss.item(), CD_loss_part, l2_loss.item(), edge_loss.item(), normal_loss.item(), 0.0, loss_net.item()))
+
+            '''
             print(
                 '[%d: %d/%d] val_cd_loss:  %f, CD_loss_part:  %f ,l2_loss: %f, edge_loss: %f, normal_loss: %f, loss_net: %f'
                 % (epoch, i, len(dataset_test) / opt.batchSize, CD_loss.item(), CD_loss_part, l2_loss.item(), edge_loss.item(), normal_loss.item(), loss_net.item()))
+                '''
 
         val_CD_curve.append(val_CD_loss.avg)
         val_l2_curve.append(val_l2_loss.avg)

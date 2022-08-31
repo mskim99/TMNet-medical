@@ -20,19 +20,19 @@ import sklearn.preprocessing as sklp
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=6)
-parser.add_argument('--model', type=str, default = './log/SVR_subnet1_usage2/network.pth',  help='your path to the trained model')
-parser.add_argument('--num_points',type=int,default=10000)
+parser.add_argument('--model', type=str, default = './log/SVR_subnet2_usage/network.pth',  help='your path to the trained model')
+parser.add_argument('--num_points',type=int,default=20000)
 parser.add_argument('--tau',type=float,default=0.1)
 parser.add_argument('--tau_decay',type=float,default=2)
 parser.add_argument('--pool',type=str,default='max',help='max or mean or sum' )
-parser.add_argument('--num_vertices', type=int, default=7682) # 2562
-parser.add_argument('--subnet',type=int,default=1)
+parser.add_argument('--num_vertices', type=int, default=10242) # 2562
+parser.add_argument('--subnet',type=int,default=2)
 parser.add_argument('--manualSeed', type=int, default=6185)
 opt = parser.parse_args()
 print (opt)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 sys.path.append("./extension/")
 import dist_chamfer as ext

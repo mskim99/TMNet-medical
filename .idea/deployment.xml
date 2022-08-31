@@ -16,7 +16,7 @@
           </mappings>
         </serverdata>
       </paths>
-      <paths name="jionkim@165.246.42.44:22 p2m_reimp">
+      <paths name="jionkim@165.246.42.44:22 p2pp">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
@@ -30,14 +30,14 @@
           </mappings>
         </serverdata>
       </paths>
-      <paths name="jionkim@165.246.44.83:22">
+      <paths name="jionkim@165.246.42.44:22 vox2vox">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
-      <paths name="jionkim@165.246.44.83:22 (2)">
+      <paths name="jionkim@165.246.44.83:22">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />

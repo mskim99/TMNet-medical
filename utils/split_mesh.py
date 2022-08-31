@@ -83,6 +83,9 @@ def split_volume(vol, level=0):
             for z_i in range(0, (b_range[2].shape[0] - 1)):
                 vol = torch.squeeze(vol)
                 vp = vol[b_range[0][x_i]:b_range[0][x_i+1], b_range[1][y_i]:b_range[1][y_i+1], b_range[2][z_i]:b_range[2][z_i+1]]
+                # print(vp.shape)
+                vol_part[b_v_i] = vp
+                '''
                 vp_resize = torch.zeros([256, 256, 256])
                 if level > 0:
                     for i in range(0, vp.shape[2]):
@@ -92,6 +95,7 @@ def split_volume(vol, level=0):
                     vol_part[b_v_i] = torch.tensor(vp_resize)
                 else:
                     vol_part[b_v_i] = vp
+                '''
                 vol_part[b_v_i] = vol_part[b_v_i].unsqueeze(dim=0)
                 vol_part[b_v_i] = vol_part[b_v_i].unsqueeze(dim=0)
                 vol_part[b_v_i] = vol_part[b_v_i].cuda()
@@ -268,18 +272,27 @@ def combine_meshes_simp_dec(mesh_vertices, mesh_vertices_combine, mesh_vertices_
         if i == 0:
             mesh_recon_proc = copy.deepcopy(mesh_parts[i])
         else:
+            mesh_recon_proc_before = copy.deepcopy(mesh_parts[i])
             mesh_recon_proc += copy.deepcopy(mesh_parts[i])
 
-        gen_v_tensor = torch.tensor(np.asarray(mesh_parts[i].vertices)).unsqueeze(0).cuda().float()
-        gt_v_tensor = torch.tensor(mesh_vertices_gt[i]).cuda().float()
+            self_int_tri = mesh_recon_proc.get_self_intersecting_triangles()
+            remove_tri = np.asarray(self_int_tri)
+            remove_tri = remove_tri[:, 1].tolist()
+            mesh_recon_proc.remove_triangles_by_index(remove_tri)
 
-        dist1_p, dist2_p, _, _ = distChamfer(gen_v_tensor, gt_v_tensor)
-        CD_loss_part_bv = torch.mean(dist1_p) + torch.mean(dist2_p)
-        CD_loss_part = CD_loss_part + CD_loss_part_bv
+            mesh_recon_proc = mesh_recon_proc.remove_duplicated_triangles()
+            mesh_recon_proc = mesh_recon_proc.remove_non_manifold_edges()
+            mesh_recon_proc = mesh_recon_proc.remove_degenerate_triangles()
 
     # mesh_recon_proc += copy.deepcopy(mesh_bd_dec)
     mesh_recon_proc += copy.deepcopy(mesh_bd_n)
     mesh_recon_proc += copy.deepcopy(mesh_bd_simp)
+
+    self_int_tri = mesh_recon_proc.get_self_intersecting_triangles()
+    remove_tri = np.asarray(self_int_tri)
+    remove_tri = remove_tri[:, 1].tolist()
+    mesh_recon_proc.remove_triangles_by_index(remove_tri)
+
     mesh_recon_proc = mesh_recon_proc.remove_duplicated_triangles()
     mesh_recon_proc = mesh_recon_proc.remove_non_manifold_edges()
     mesh_recon_proc = mesh_recon_proc.remove_degenerate_triangles()
